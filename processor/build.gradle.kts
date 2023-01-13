@@ -1,6 +1,5 @@
 plugins {
     kotlin("jvm")
-    `maven-publish`
 }
 
 dependencies {
@@ -13,13 +12,23 @@ dependencies {
     api("org.jetbrains.kotlinx:kotlinx-serialization-core:1.4.1")
 }
 
-publishing {
-    repositories {
-        mavenLocal()
+kotlin {
+    target {
+        compilations {
+            all {
+                kotlinOptions {
+                    freeCompilerArgs += "-Xcontext-receivers"
+                    jvmTarget = "17"
+                }
+            }
+        }
     }
-    publications {
-        create<MavenPublication>(project.name) {
-            from(components["java"])
+    sourceSets {
+        all {
+            languageSettings {
+                optIn("com.google.devtools.ksp.KspExperimental")
+                optIn("com.squareup.kotlinpoet.ExperimentalKotlinPoetApi")
+            }
         }
     }
 }

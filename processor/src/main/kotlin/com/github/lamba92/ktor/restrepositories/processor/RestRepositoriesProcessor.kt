@@ -4,52 +4,91 @@ import com.github.lamba92.ktor.restrepositories.annotations.RestRepository
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
-import com.squareup.kotlinpoet.ClassName
-import com.squareup.kotlinpoet.FileSpec
-import com.squareup.kotlinpoet.PropertySpec
-import com.squareup.kotlinpoet.TypeSpec
+import com.google.devtools.ksp.symbol.KSFile
+import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.writeTo
-import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 
-class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, private val logger: KSPLogger) : SymbolProcessor {
+class RestRepositoriesProcessor(
+    private val codeGenerator: CodeGenerator,
+    private val logger: KSPLogger
+) : SymbolProcessor {
+
+    companion object {
+        val RestRepositoryFQN = RestRepository::class.qualifiedName!!
+    }
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        logger.warn("HELLO!")
-        resolver.getSymbolsWithAnnotation(RestRepository::class.qualifiedName!!)
-            .filterIsInstance<KSClassDeclaration>()
-            .filter { Table::class in it.superTypes }
-            .forEach { tableClassDeclaration ->
-                val originatingFile = tableClassDeclaration.containingFile ?: return@forEach
-                val tableName = tableClassDeclaration.simpleName.asString()
-                val properties = tableClassDeclaration.getAllProperties()
-                    .map { it.type.resolve() }
-                    .filter { it.declaration.qualifiedName?.asString() == Column::class.qualifiedName }
-                    .filter { it.arguments.size == 1 }
-                    .map {
-                        PropertySpec.Companion.builder(
-                            it.declaration.simpleName.asString(),
-                            it.arguments.first().type!!.resolve().toClassName()
-                        ).build()
-                    }
-                    .toList()
-                val dtoClassName = ClassName(
-                    packageName = tableClassDeclaration.packageName.asString(),
-                    "${tableClassDeclaration.simpleName.asString()}DTO"
-                )
-
-                val classSpec = TypeSpec.classBuilder(dtoClassName)
-                    .addAnnotation(Serializable::class)
-                    .addProperties(properties)
-                    .build()
-
-                FileSpec.builder(dtoClassName.packageName, dtoClassName.simpleName)
-                    .addType(classSpec)
-                    .build()
-                    .writeTo(codeGenerator, Dependencies(false, originatingFile))
-            }
+        resolver.forEachDeclaredTable { tableClassDeclaration: KSClassDeclaration ->
+            val originatingFile = tableClassDeclaration.containingFile ?: return@forEachDeclaredTable
+            val columnDeclarations = tableClassDeclaration.getDeclaredColumn()
+            val dtoPropertiesSpecs = columnDeclarations
+                .generateDTOPropertiesSpecs()
+                .toList()
+            val generatedPackageName = tableClassDeclaration.packageName.asString()
+            val dtoClassName = ClassName(
+                packageName = "$generatedPackageName.dto",
+                "${tableClassDeclaration.simpleName.asString().removeSuffix("s")}DTO"
+            )
+            val dtoSpec = generateDto(dtoClassName, dtoPropertiesSpecs)
+            writeDto(generatedPackageName, dtoClassName, dtoSpec, originatingFile)
+            writeFunctions(
+                generatedPackageName,
+                dtoClassName,
+                dtoPropertiesSpecs.map { it.parameters },
+                tableClassDeclaration.toClassName(),
+                originatingFile
+            )
+        }
 
         return emptyList()
     }
+
+    private fun writeFunctions(
+        generatedPackageName: String,
+        dtoClassName: ClassName,
+        allProperties: List<ParameterSpec>,
+        tableClassName: ClassName,
+        originatingFile: KSFile
+    ) = FileSpec.builder("$generatedPackageName.queries", "${tableClassName.simpleName}Queries")
+        .addImport(
+            "org.jetbrains.exposed.sql",
+            "insert", "Transaction", "select", "deleteWhere", "update"
+        )
+        .addImport(dtoClassName.packageName, dtoClassName.simpleName)
+        .addFunction(generateInsert(dtoClassName, allProperties, tableClassName))
+        .foldOn(allProperties) { acc, parameterSpec ->
+            acc.addFunction(generateSelectBySingleProperty(dtoClassName, parameterSpec, allProperties, tableClassName))
+                .addFunction(generateSelectByMultipleProperties(dtoClassName, parameterSpec, allProperties, tableClassName))
+                .addFunction(generateDeleteBySingleProperty(parameterSpec, tableClassName))
+                .addFunction(generateUpdateBySingleProperty(dtoClassName, parameterSpec, allProperties, tableClassName))
+        }
+        .build()
+        .writeTo(codeGenerator, Dependencies(false, originatingFile))
+
+    private fun writeDto(
+        generatedPackageName: String,
+        dtoClassName: ClassName,
+        dtoSpec: TypeSpec,
+        originatingFile: KSFile
+    ) = FileSpec.builder("$generatedPackageName.dto", dtoClassName.simpleName)
+        .addType(dtoSpec)
+        .build()
+        .writeTo(codeGenerator, Dependencies(false, originatingFile))
+
 }
+
+
+
+object Users : Table() {
+    val id = varchar("id", 10) // Column<String>
+    val name = varchar("name", length = 50) // Column<String>
+//    val cityId = (integer("city_id") references Cities.id).nullable() // Column<Int?>
+}
+
+
+
+
+
+
