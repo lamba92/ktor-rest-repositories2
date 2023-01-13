@@ -5,6 +5,7 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 rootProject.name = "ktor-rest-repositories"
 
 pluginManagement {
+    includeBuild("gradle-plugin")
     plugins {
         val kotlinVersion = "1.8.0"
         kotlin("jvm") version kotlinVersion
@@ -19,4 +20,4 @@ dependencyResolutionManagement {
     }
 }
 
-include(":annotations", ":processor")
+include(":tests", ":processor", ":annotations", ":ktor-plugin")

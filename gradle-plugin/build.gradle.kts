@@ -16,6 +16,9 @@ plugins {
     `kotlin-dsl`
 }
 
+group = "com.github.lamba92"
+version = "1.0-SNAPSHOT"
+
 gradlePlugin {
     plugins {
         create("restRepositoriesPlugin") {

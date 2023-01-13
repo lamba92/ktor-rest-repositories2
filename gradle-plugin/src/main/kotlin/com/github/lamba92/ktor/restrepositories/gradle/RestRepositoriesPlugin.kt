@@ -1,15 +1,25 @@
 package com.github.lamba92.ktor.restrepositories.gradle
 
+import org.gradle.api.Named
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
-import org.gradle.kotlin.dsl.dependencies
-import org.gradle.kotlin.dsl.getValue
-import org.gradle.kotlin.dsl.invoke
-import org.gradle.kotlin.dsl.provideDelegate
+import org.gradle.api.provider.Property
+import org.gradle.kotlin.dsl.*
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 class RestRepositoriesPlugin : Plugin<Project> {
+
+    open class Extension(
+        private val name: String,
+        val addDependency: Property<Boolean>,
+        val dependencyVersion: Property<String>
+    ) : Named {
+
+
+        override fun getName() = name
+
+    }
 
     companion object {
         const val REST_REPOSITORIES_PROCESSOR_COORDINATES = "com.github.lamba92:ktor-rest-repositories-symbol-processor"
@@ -17,9 +27,19 @@ class RestRepositoriesPlugin : Plugin<Project> {
 
     override fun apply(target: Project): Unit = with(target) {
         plugins.withId("com.google.devtools.ksp") {
-            val ksp: Configuration by configurations
-            dependencies {
-                ksp("$REST_REPOSITORIES_PROCESSOR_COORDINATES:$REST_REPOSITORIES_VERSION")
+            val extension = extensions.create<Extension>(
+                "restRepositories",
+                "restRepositories",
+                objects.property<Boolean>().apply { set(true) },
+                objects.property<String>().apply { set(REST_REPOSITORIES_VERSION) },
+            )
+            afterEvaluate {
+                if (extension.addDependency.get()) {
+                    val ksp: Configuration by configurations
+                    dependencies {
+                        ksp("$REST_REPOSITORIES_PROCESSOR_COORDINATES:${extension.dependencyVersion.get()}")
+                    }
+                }
             }
         }
         plugins.withId("org.jetbrains.kotlin.jvm") {
