@@ -2,10 +2,13 @@ package com.github.lamba92.ktor.restrepositories
 
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.auth.*
 import io.ktor.server.routing.*
 import io.ktor.util.pipeline.*
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.Transaction
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.sql.Connection
 
 object TestTable : Table() {
@@ -13,9 +16,10 @@ object TestTable : Table() {
 }
 
 data class TestTableDTO(val id: String)
+data class RestRepositoriesRouteSetupKey(val path: String, val method: HttpMethod)
 
 class RestRepositoriesConfiguration {
-    val entitiesConfigurationMap: MutableMap<Pair<String, HttpMethod>, Route.() -> Unit> = mutableMapOf()
+    val entitiesConfigurationMap: MutableMap<RestRepositoriesRouteSetupKey, Route.() -> Unit> = mutableMapOf()
 
     internal val builtRoutes
         get() = entitiesConfigurationMap.values.toList()
@@ -26,7 +30,10 @@ class RestRepositoriesConfiguration {
             field = value
         }
 
-    fun registerTestTable(database: Database,  httpMethodConf: EndpointsSetup<TestTableDTO>.() -> Unit) {
+    fun registerTestTable(database: Database,  configure: EndpointsSetup<TestTableDTO>.() -> Unit) {
+        val setup = EndpointsSetup<TestTableDTO>("whaever")
+            .apply(configure)
+
 
     }
 
@@ -36,38 +43,38 @@ class RestRepositoriesConfiguration {
         isolation: Int = Connection.TRANSACTION_REPEATABLE_READ,
         httpMethodConf: EndpointsSetup<T>.() -> Unit
     ) {
-        EndpointsSetup<T>(table::class.simpleName!!.toLowerCase())
-            .apply(httpMethodConf)
-            .apply {
-                val logBuilder = StringBuilder()
-                assert(entityPath.withoutWhitespaces.isNotBlank()) { "${T::class.simpleName} path cannot be blank or empty" }
-                logBuilder.appendln("Building methods for entity ${T::class.simpleName}:")
-                configuredMethods.forEach { (httpMethod, behaviour) ->
-                    entitiesConfigurationMap[entityPath.withoutWhitespaces to httpMethod] =
-                        getDefaultBehaviour<T, K>(
-                            table,
-                            httpMethod,
-                            database,
-                            isolation,
-                            behaviour.restRepositoryInterceptor
-                        ).toRoute(
-                            entityPath.withoutWhitespaces,
-                            httpMethod,
-                            behaviour.isAuthenticated,
-                            behaviour.authNames
-                        )
-                    logBuilder.appendln(
-                        "     - ${httpMethod.value.padEnd(7)} | ${repositoryPath.withoutWhitespaces}/${entityPath.withoutWhitespaces} " +
-                                "| Authentication realm/s: ${behaviour.authNames.joinToString { it ?: "Default" }}"
-                    )
-                }
-                logger.info(logBuilder.toString())
-            }
+//        EndpointsSetup<T>(table::class.simpleName!!.toLowerCase())
+//            .apply(httpMethodConf)
+//            .apply {
+//                val logBuilder = StringBuilder()
+//                assert(tablePath.withoutWhitespaces.isNotBlank()) { "${T::class.simpleName} path cannot be blank or empty" }
+//                logBuilder.appendln("Building methods for entity ${T::class.simpleName}:")
+//                configuredMethods.forEach { (httpMethod, behaviour) ->
+//                    entitiesConfigurationMap[tablePath.withoutWhitespaces to httpMethod] =
+//                        getDefaultBehaviour<T, K>(
+//                            table,
+//                            httpMethod,
+//                            database,
+//                            isolation,
+//                            behaviour.restRepositoryInterceptor
+//                        ).toRoute(
+//                            tablePath.withoutWhitespaces,
+//                            httpMethod,
+//                            behaviour.isAuthenticated,
+//                            behaviour.authNames
+//                        )
+//                    logBuilder.appendln(
+//                        "     - ${httpMethod.value.padEnd(7)} | ${repositoryPath.withoutWhitespaces}/${tablePath.withoutWhitespaces} " +
+//                                "| Authentication realm/s: ${behaviour.authNames.joinToString { it ?: "Default" }}"
+//                    )
+//                }
+//                logger.info(logBuilder.toString())
+//            }
 
     }
 
     class EndpointsSetup<T : Any>(
-        var entityPath: String
+        var tablePath: String
     ) {
 
         val configuredMethods = mutableMapOf<HttpMethod, Behaviour<T>>()
@@ -82,6 +89,7 @@ class RestRepositoriesConfiguration {
 
         data class Behaviour<T>(
             var isAuthenticated: Boolean = false,
+            val authStrategy: AuthenticationStrategy = AuthenticationStrategy.Optional,
             var authNames: List<String?> = mutableListOf(null),
             var restRepositoryInterceptor: RestRepositoryInterceptor<T> = { it }
         )
@@ -89,18 +97,10 @@ class RestRepositoriesConfiguration {
     }
 }
 
-typealias RestRepositoryInterceptor<T> = PipelineInterceptor<Unit, ApplicationCall>.(T) -> T
+typealias RestRepositoryInterceptor<T> = suspend Transaction.(T) -> T
 
-fun lol(database: Database) {
-    with(RestRepositoriesConfiguration()) {
-        registerTestTable(database) {
-            addEndpoint(HttpMethod.Get) {
-                restRepositoryInterceptor = { dto ->
-
-                }
-            }
-        }
-    }
+suspend fun Route.lol(database: Database, list: List<String>) {
+    newSuspendedTransaction {  }
 }
 
 val restRepositories

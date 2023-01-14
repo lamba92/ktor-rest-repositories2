@@ -7,7 +7,7 @@ dependencies {
     val kotlinPoetVersion = "1.12.0"
     api("com.squareup:kotlinpoet:$kotlinPoetVersion")
     api("com.squareup:kotlinpoet-ksp:$kotlinPoetVersion")
-    api(projects.annotations)
+    api(projects.ktorPlugin)
     api("org.jetbrains.exposed:exposed:0.17.14")
     api("org.jetbrains.kotlinx:kotlinx-serialization-core:1.4.1")
 }

@@ -32,18 +32,56 @@ class RestRepositoriesProcessor(
                 "${tableClassDeclaration.simpleName.asString().removeSuffix("s")}DTO"
             )
             val dtoSpec = generateDto(dtoClassName, dtoPropertiesSpecs)
-            writeDto(generatedPackageName, dtoClassName, dtoSpec, originatingFile)
-            writeFunctions(
-                generatedPackageName,
-                dtoClassName,
-                dtoPropertiesSpecs.map { it.parameters },
-                tableClassDeclaration.toClassName(),
-                originatingFile
+            val tableTypeSpec = tableClassDeclaration.toClassName()
+            writeDto(
+                generatedPackageName = generatedPackageName,
+                dtoClassName = dtoClassName,
+                dtoSpec = dtoSpec,
+                originatingFile = originatingFile
             )
+            val functions = writeFunctions(
+                generatedPackageName = generatedPackageName,
+                dtoClassName = dtoClassName,
+                allProperties = dtoPropertiesSpecs.map { it.parameters },
+                tableClassName = tableTypeSpec,
+                originatingFile = originatingFile
+            )
+            writeRoutes(
+                generatedPackageName = generatedPackageName,
+                tableClassName = tableTypeSpec,
+                dtoSpec = dtoClassName,
+                tableTypeSpec = tableTypeSpec,
+                insert = functions.insert,
+                originatingFile = originatingFile
+            )
+
         }
 
         return emptyList()
     }
+
+    private fun writeRoutes(
+        dtoSpec: ClassName,
+        tableTypeSpec: ClassName,
+        insert: FunSpec,
+        generatedPackageName: String,
+        tableClassName: ClassName,
+        originatingFile: KSFile,
+    ) =
+        FileSpec.builder("$generatedPackageName.queries", "${tableClassName.simpleName}Routes")
+            .addImport(dtoSpec.packageName, dtoSpec.simpleName)
+            .addImport(
+                "org.jetbrains.exposed.sql.transactions.experimental",
+                "newSuspendedTransaction"
+            )
+            .addImport("io.ktor.server.application", "call")
+            .addImport("io.ktor.server.auth", "authenticate")
+            .addImport("io.ktor.server.request", "receive")
+            .addImport("io.ktor.server.response", "respond")
+            .addImport("io.ktor.server.routing", "Route", "get")
+            .addFunction(generateInsertRouteFunctionSpec(dtoSpec, tableTypeSpec, insert))
+            .build()
+            .writeTo(codeGenerator, Dependencies(false, originatingFile))
 
     private fun writeFunctions(
         generatedPackageName: String,
@@ -51,21 +89,28 @@ class RestRepositoriesProcessor(
         allProperties: List<ParameterSpec>,
         tableClassName: ClassName,
         originatingFile: KSFile
-    ) = FileSpec.builder("$generatedPackageName.queries", "${tableClassName.simpleName}Queries")
-        .addImport(
-            "org.jetbrains.exposed.sql",
-            "insert", "Transaction", "select", "deleteWhere", "update"
+    ): GeneratedFunctions {
+        val functions = GeneratedFunctions(
+            generateInsert(dtoClassName, allProperties, tableClassName),
+            allProperties.associateWith { generateSelectBySingleProperty(dtoClassName, it, allProperties, tableClassName) },
+            allProperties.associateWith { generateSelectByMultipleProperties(dtoClassName, it, allProperties, tableClassName) },
+            allProperties.associateWith { generateDeleteBySingleProperty(it, tableClassName) },
+            allProperties.associateWith { generateUpdateBySingleProperty(dtoClassName, it, allProperties, tableClassName) },
         )
-        .addImport(dtoClassName.packageName, dtoClassName.simpleName)
-        .addFunction(generateInsert(dtoClassName, allProperties, tableClassName))
-        .foldOn(allProperties) { acc, parameterSpec ->
-            acc.addFunction(generateSelectBySingleProperty(dtoClassName, parameterSpec, allProperties, tableClassName))
-                .addFunction(generateSelectByMultipleProperties(dtoClassName, parameterSpec, allProperties, tableClassName))
-                .addFunction(generateDeleteBySingleProperty(parameterSpec, tableClassName))
-                .addFunction(generateUpdateBySingleProperty(dtoClassName, parameterSpec, allProperties, tableClassName))
-        }
-        .build()
-        .writeTo(codeGenerator, Dependencies(false, originatingFile))
+        FileSpec.builder("$generatedPackageName.queries", "${tableClassName.simpleName}Queries")
+            .addImport(
+                "org.jetbrains.exposed.sql",
+                "insert", "Transaction", "select", "deleteWhere", "update"
+            )
+            .addImport(dtoClassName.packageName, dtoClassName.simpleName)
+            .addFunction(functions.insert)
+            .foldOn(functions.selectBySingle.values) { acc, spec -> acc.addFunction(spec) }
+            .foldOn(functions.delete.values) { acc, spec -> acc.addFunction(spec) }
+            .foldOn(functions.selectByMultiple.values) { acc, spec -> acc.addFunction(spec) }
+            .build()
+            .writeTo(codeGenerator, Dependencies(false, originatingFile))
+        return functions
+    }
 
     private fun writeDto(
         generatedPackageName: String,
@@ -78,7 +123,6 @@ class RestRepositoriesProcessor(
         .writeTo(codeGenerator, Dependencies(false, originatingFile))
 
 }
-
 
 
 object Users : Table() {

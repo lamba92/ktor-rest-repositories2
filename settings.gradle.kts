@@ -20,4 +20,4 @@ dependencyResolutionManagement {
     }
 }
 
-include(":tests", ":processor", ":annotations", ":ktor-plugin")
+include(":tests", ":processor", ":ktor-plugin")
