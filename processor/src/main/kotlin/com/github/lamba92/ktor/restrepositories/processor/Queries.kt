@@ -7,7 +7,7 @@ import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.asTypeName
 import org.jetbrains.exposed.sql.Transaction
 
-fun generateInsert(dtoClassName: ClassName, allProperties: List<ParameterSpec>, tableTypeSpec: ClassName) =
+fun generateSingleInsert(dtoClassName: ClassName, allProperties: List<ParameterSpec>, tableTypeSpec: ClassName) =
     FunSpec.builder("insert")
         .contextReceivers(Transaction::class.asTypeName())
         .receiver(tableTypeSpec)
@@ -31,6 +31,44 @@ fun generateInsert(dtoClassName: ClassName, allProperties: List<ParameterSpec>, 
         .returns(dtoClassName)
         .build()
 
+fun generateBulkSingleInsert(
+    dtoClassName: ClassName,
+    allProperties: List<ParameterSpec>,
+    tableTypeSpec: ClassName
+): FunSpec {
+    val returnType = ClassName("kotlin.collections", "List")
+        .parameterizedBy(dtoClassName)
+    return FunSpec.builder("insert")
+        .contextReceivers(Transaction::class.asTypeName())
+        .receiver(tableTypeSpec)
+        .addParameter(
+            ParameterSpec.builder(
+                "dtos",
+                returnType
+            ).build()
+        )
+        .addCode(buildString {
+            appendLine("return dtos.map { dto ->")
+            appendLine("\tval insertStatement = insert {")
+            allProperties.forEach {
+                val name = it.name
+                appendLine("\t\tdto.$name?.let { dto${name.capitalize()} -> it[$name] = dto${name.capitalize()} }")
+            }
+            appendLine("\t}")
+            appendLine("\t${dtoClassName.simpleName}(")
+            allProperties.forEachIndexed { index, property ->
+                val name = property.name
+                append("\t\tinsertStatement[$name]")
+                if (index != allProperties.lastIndex) appendLine(",")
+                else appendLine()
+            }
+            appendLine("\t)")
+            appendLine("}")
+        })
+        .returns(returnType)
+        .build()
+}
+
 fun generateUpdateBySingleProperty(
     dtoClassName: ClassName,
     parameter: ParameterSpec,
@@ -47,8 +85,10 @@ fun generateUpdateBySingleProperty(
         appendLine("// Query for updating by ${parameter.name}")
         appendLine("return update({ ${parameter.name} eq parameter }) {")
         allParameters.forEach { param ->
-            appendLine("\tdto.${param.name}?.let { new${param.name.capitalize()} " +
-                    "-> it[${param.name}] = new${param.name.capitalize()} }")
+            appendLine(
+                "\tdto.${param.name}?.let { new${param.name.capitalize()} " +
+                        "-> it[${param.name}] = new${param.name.capitalize()} }"
+            )
         }
         appendLine("}")
     })

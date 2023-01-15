@@ -19,6 +19,14 @@ class TestTable : Table() {
     val aLong = long("age")
 }
 
+@RestRepository
+class UsersTable : Table() {
+    val id = integer("id")
+    val name = varchar("name", 255)
+
+    val surname = varchar("surname", 255).nullable()
+}
+
 object LSerializer : KSerializer<Long> {
 
     override val descriptor: SerialDescriptor
