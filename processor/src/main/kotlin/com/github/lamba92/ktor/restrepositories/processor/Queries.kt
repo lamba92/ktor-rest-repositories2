@@ -1,10 +1,7 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
-import com.squareup.kotlinpoet.ClassName
-import com.squareup.kotlinpoet.FunSpec
-import com.squareup.kotlinpoet.ParameterSpec
+import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
-import com.squareup.kotlinpoet.asTypeName
 import org.jetbrains.exposed.sql.Transaction
 
 fun generateSingleInsert(dtoClassName: ClassName, allProperties: List<ParameterSpec>, tableTypeSpec: ClassName) =
@@ -71,24 +68,23 @@ fun generateBulkSingleInsert(
 
 fun generateUpdateBySingleProperty(
     dtoClassName: ClassName,
-    parameter: ParameterSpec,
-    allParameters: List<ParameterSpec>,
+    dtoPropertiesSpecs: List<DTOPropertiesSpec>,
     tableTypeSpec: ClassName,
+    dtoParameter: ParameterSpec,
 ) = FunSpec
-    .builder("update${tableTypeSpec.simpleName}By${parameter.name.capitalize()}")
+    .builder("update${tableTypeSpec.simpleName}By${dtoParameter.name.capitalize()}")
     .contextReceivers(Transaction::class.asTypeName())
     .receiver(tableTypeSpec)
-    .addParameter("parameter", parameter.type.copy(nullable = false))
+    .addParameter("parameter", dtoParameter.type.copy(nullable = false))
     .addParameter("dto", dtoClassName)
     .returns(Int::class)
     .addCode(buildString {
-        appendLine("// Query for updating by ${parameter.name}")
-        appendLine("return update({ ${parameter.name} eq parameter }) {")
-        allParameters.forEach { param ->
-            appendLine(
-                "\tdto.${param.name}?.let { new${param.name.capitalize()} " +
-                        "-> it[${param.name}] = new${param.name.capitalize()} }"
-            )
+        appendLine("// Query for updating by ${dtoParameter.name}")
+        appendLine("return update({ ${dtoParameter.name} eq parameter }) {")
+        dtoPropertiesSpecs.forEach {
+            append("it[${it.parameter.name}] = ")
+            if (it.originalColumnType.isMarkedNullable) appendLine("dto.${it.parameter.name}")
+            else appendLine("requireNotNull(dto.${it.parameter.name}) { \"${dtoClassName.simpleName}.${it.parameter.name} is null\" }")
         }
         appendLine("}")
     })

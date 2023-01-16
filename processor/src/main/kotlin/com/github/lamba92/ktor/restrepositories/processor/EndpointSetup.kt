@@ -1,7 +1,8 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
+import com.github.lamba92.ktor.restrepositories.EndpointBehaviour
+import com.github.lamba92.ktor.restrepositories.EndpointsSetup
 import com.github.lamba92.ktor.restrepositories.RestRepositoriesConfiguration
-import com.github.lamba92.ktor.restrepositories.RestRepositoriesConfiguration.EndpointsSetup
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import io.ktor.server.routing.*
@@ -32,16 +33,16 @@ fun generateInsertRouteFunctionSpec(
         appendLine()
         appendLine(tabs, "val dto = call.receive<${dtoSpec.simpleName}>()")
         appendLine(tabs, "val result = newSuspendedTransaction(db = database) {")
-        appendLine(tabs, "\tbehaviour.restRepositoryInterceptor(this, table.${insertSingle.name}(dto))")
+        appendLine(tabs, "\ttable.${insertSingle.name}(behaviour.restRepositoryInterceptor(this, dto))")
         appendLine(tabs, "}")
         appendLine(tabs, "call.respond(result)")
     }
 
     fun getBulkContent(tabs: Int) = buildString {
         appendLine()
-        appendLine(tabs, "val dto = call.receive<List<${dtoSpec.simpleName}>>()")
+        appendLine(tabs, "val dtos = call.receive<List<${dtoSpec.simpleName}>>()")
         appendLine(tabs, "val result = newSuspendedTransaction(db = database) {")
-        appendLine(tabs, "\ttable.${insertBulk.name}(dto).map { behaviour.restRepositoryInterceptor(this, it) }")
+        appendLine(tabs, "\ttable.${insertBulk.name}(dtos.map { behaviour.restRepositoryInterceptor(this, it) })")
         appendLine(tabs, "}")
         appendLine(tabs, "call.respond(result)")
     }
@@ -59,13 +60,13 @@ fun generateInsertRouteFunctionSpec(
         .addParameter("table", tableTypeSpec)
         .addParameter("database", Database::class)
         .addParameter("path", String::class)
-        .addParameter("behaviour", EndpointsSetup.Behaviour::class.asTypeName().parameterizedBy(dtoSpec))
+        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpec))
         .addCode(generateAuthCode(getCheckAuthCode(2), getCheckAuthCode(1)))
         .build()
 }
 
 fun generateSelectRouteFunctionSpecForParam(
-    dtoSpec: ClassName,
+    dtoClassName: ClassName,
     tableTypeSpec: ClassName,
     parameterSpec: ParameterSpec,
     selectSingle: FunSpec,
@@ -102,21 +103,53 @@ fun generateSelectRouteFunctionSpecForParam(
         .addParameter("table", tableTypeSpec)
         .addParameter("database", Database::class)
         .addParameter("path", String::class)
-        .addParameter("behaviour", EndpointsSetup.Behaviour::class.asTypeName().parameterizedBy(dtoSpec))
+        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoClassName))
         .addCode(generateAuthCode(getCheckAuthCode(1), getCheckAuthCode(2)))
         .build()
 }
 
-fun generateSelectRouteFunctionSpec(
-    dtoSpec: ClassName,
+fun generateUpdateRouteFunctionSpecForParam(
+    dtoSpecs: DTOSpecs,
     tableTypeSpec: ClassName,
-    functions: List<FunSpec>
-) = FunSpec.builder("installTestTableSelect")
+    parameterSpec: ParameterSpec,
+    updateFunctionSpec: FunSpec,
+): FunSpec {
+    fun getSingleContent(tabs: Int) = buildString {
+        appendLine()
+        appendLine(tabs, "val updateDto = call.receive<${dtoSpecs.updateQueryDto.name}<${parameterSpec.type.copy(nullable = false)}>>()")
+        appendLine(tabs, "newSuspendedTransaction(db = database) {")
+        appendLine(tabs, "\tval intercepted = behaviour.restRepositoryInterceptor(this, updateDto.update)")
+        appendLine(tabs, "\ttable.${updateFunctionSpec.name}(updateDto.query, intercepted)")
+        appendLine(tabs, "}")
+        appendLine(tabs, "call.respond(updateDto)")
+    }
+
+    fun getCheckAuthCode(tabs: Int) = buildString {
+        appendLine(tabs, "post(path) {")
+        appendLine(tabs, getSingleContent(tabs + 1))
+        appendLine(tabs, "}")
+    }
+    return FunSpec.builder("install" + tableTypeSpec.simpleName + "UpdateBy${parameterSpec.name.capitalize()}Routes")
+        .receiver(Route::class)
+        .addParameter("table", tableTypeSpec)
+        .addParameter("database", Database::class)
+        .addParameter("path", String::class)
+        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpecs.dtoClassName))
+        .addCode(generateAuthCode(getCheckAuthCode(1), getCheckAuthCode(2)))
+        .build()
+}
+
+fun generateRouteFunctionSpec(
+    dtoClassName: ClassName,
+    tableTypeSpec: ClassName,
+    functions: List<FunSpec>,
+    clauseName: String
+) = FunSpec.builder("install${tableTypeSpec.simpleName.capitalize()}${clauseName.capitalize()}")
     .receiver(Route::class)
     .addParameter("table", tableTypeSpec)
     .addParameter("database", Database::class)
     .addParameter("path", String::class)
-    .addParameter("behaviour", EndpointsSetup.Behaviour::class.asTypeName().parameterizedBy(dtoSpec))
+    .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoClassName))
     .addCode(buildString {
         functions.forEach { appendLine("${it.name}(table, database, path, behaviour)") }
     })
@@ -136,10 +169,12 @@ private fun generateAuthCode(authContent: String, unAuthContent: String) = build
 private fun String.decapitalize() = replaceFirstChar { it.lowercase(Locale.getDefault()) }
 
 fun generateTableEndpointSetup(
-    dtoSpec: ClassName,
+    dtoClassName: ClassName,
     tableTypeSpec: ClassName,
     insertRouteInstallSpec: FunSpec,
-    selectRouteInstallSpec: FunSpec
+    selectRouteInstallSpec: FunSpec,
+    updateRouteInstallSpec: FunSpec,
+//    deleteRouteInstallSpec: FunSpec
 ) =
     FunSpec.builder("registerTable")
         .receiver(RestRepositoriesConfiguration::class)
@@ -152,19 +187,21 @@ fun generateTableEndpointSetup(
         )
         .addParameter(
             "configure",
-            LambdaTypeName.get(EndpointsSetup::class.asTypeName().parameterizedBy(dtoSpec), returnType = UNIT)
+            LambdaTypeName.get(EndpointsSetup::class.asTypeName().parameterizedBy(dtoClassName), returnType = UNIT)
         )
         .addCode(buildString {
-            appendLine("val setup = EndpointsSetup<${dtoSpec.simpleName}>(\"${tableTypeSpec.simpleName.decapitalize()}\")")
+            appendLine("val setup = EndpointsSetup<${dtoClassName.simpleName}>(\"${tableTypeSpec.simpleName.decapitalize()}\")")
             appendLine("\t.apply(configure)")
             appendLine("val tablePath = setup.tablePath.filter { !it.isWhitespace() }")
             appendLine("assert(tablePath.isNotEmpty()) { \"${tableTypeSpec.simpleName} path cannot be blank or empty\" }")
 
-            appendLine("setup.configuredMethods.forEach { (httpMethod, behaviour) ->")
-            appendLine("\tentitiesConfigurationMap[RestRepositoriesRouteSetupKey(tablePath, httpMethod)] = {")
-            appendLine("\t\twhen(httpMethod) {")
-            appendLine("\t\t\tHttpMethod.Put -> ${insertRouteInstallSpec.name}(table, database, tablePath, behaviour)")
-            appendLine("\t\t\tHttpMethod.Get -> ${selectRouteInstallSpec.name}(table, database, tablePath, behaviour)")
+            appendLine("setup.configuredMethods.forEach { (endpoint, behaviour) ->")
+            appendLine("\tentitiesConfigurationMap[RestRepositoriesRouteSetupKey(tablePath, endpoint)] = {")
+            appendLine("\t\twhen(endpoint) {")
+            appendLine("\t\t\tEndpoint.INSERT -> ${insertRouteInstallSpec.name}(table, database, tablePath, behaviour)")
+            appendLine("\t\t\tEndpoint.SELECT -> ${selectRouteInstallSpec.name}(table, database, tablePath, behaviour)")
+            appendLine("\t\t\tEndpoint.UPDATE -> ${updateRouteInstallSpec.name}(table, database, tablePath, behaviour)")
+//            appendLine("\t\t\tEndpoint.DELETE -> ${deleteRouteInstallSpec.name}(table, database, tablePath, behaviour)")
             appendLine("\t\t}")
             appendLine("\t}")
             appendLine("}")

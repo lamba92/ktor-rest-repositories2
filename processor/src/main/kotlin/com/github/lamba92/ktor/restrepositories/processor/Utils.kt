@@ -31,20 +31,19 @@ fun ParameterSpec.Builder.copyKotlinxSerializationAnnotations(annotations: Seque
 
 
 data class ColumnDeclaration(val propertyDeclaration: KSPropertyDeclaration, val resolvedType: KSType)
-data class DTOPropertiesSpec(val properties: PropertySpec, val parameters: ParameterSpec)
+data class DTOPropertiesSpec(val originalColumnType: KSType, val property: PropertySpec, val parameter: ParameterSpec)
 
 fun Sequence<ColumnDeclaration>.generateDTOPropertiesSpecs() =
     map { (propertyDeclaration: KSPropertyDeclaration, resolvedType: KSType) ->
         val name = propertyDeclaration.simpleName.asString()
-        val type = resolvedType.arguments.first().type!!.resolve().toTypeName()
-            .copy(nullable = true)
-        val propertySpecBuilder = PropertySpec.builder(name, type)
-        val parameterSpecBuilder = ParameterSpec.builder(name, type)
+        val type = resolvedType.arguments.first().type!!.resolve()
+        val propertySpecBuilder = PropertySpec.builder(name, type.toTypeName().copy(nullable = true))
+        val parameterSpecBuilder = ParameterSpec.builder(name, type.toTypeName().copy(nullable = true))
             .defaultValue("null")
 
         parameterSpecBuilder.copyKotlinxSerializationAnnotations(propertyDeclaration.annotations)
         propertySpecBuilder.initializer(name)
-        DTOPropertiesSpec(propertySpecBuilder.build(), parameterSpecBuilder.build())
+        DTOPropertiesSpec(type, propertySpecBuilder.build(), parameterSpecBuilder.build())
     }
 
 fun KSClassDeclaration.getDeclaredColumn() = getDeclaredProperties()
@@ -63,16 +62,52 @@ fun String.capitalize() =
 
 fun <T> FileSpec.Builder.foldOn(iterables: Iterable<T>, action: (FileSpec.Builder, T) -> FileSpec.Builder) =
     iterables.fold(this, action)
-fun generateDto(
+
+fun generateDtos(
     dtoClassName: ClassName,
+    updateQueryDtoClassName: ClassName,
     properties: List<DTOPropertiesSpec>
-) = TypeSpec.classBuilder(dtoClassName)
-    .addModifiers(KModifier.DATA)
-    .addAnnotation(Serializable::class)
-    .primaryConstructor(
-        FunSpec.constructorBuilder()
-            .addParameters(properties.map { it.parameters })
-            .build()
-    )
-    .addProperties(properties.map { it.properties })
-    .build()
+): DTOSpecs {
+    val dto = TypeSpec.classBuilder(dtoClassName)
+        .addModifiers(KModifier.DATA)
+        .addAnnotation(Serializable::class)
+        .primaryConstructor(
+            FunSpec.constructorBuilder()
+                .addParameters(properties.map { it.parameter })
+                .build()
+        )
+        .addProperties(properties.map { it.property })
+        .build()
+    val typeVariable = TypeVariableName("T")
+    val queryParamSpec = ParameterSpec("query", typeVariable)
+    val queryPropertySpec = PropertySpec.builder("query", typeVariable)
+        .initializer("query")
+        .build()
+    val updateParamSpec = ParameterSpec("update", dtoClassName)
+    val updatePropertySpec = PropertySpec.builder("update", dtoClassName)
+        .initializer("update")
+        .build()
+    val updateDto = TypeSpec.classBuilder(updateQueryDtoClassName)
+        .addModifiers(KModifier.DATA)
+        .addTypeVariable(typeVariable)
+        .addAnnotation(Serializable::class)
+        .primaryConstructor(
+            FunSpec.constructorBuilder()
+                .addParameter(queryParamSpec)
+                .addParameter(updateParamSpec)
+                .build()
+        )
+        .addProperty(queryPropertySpec)
+        .addProperty(updatePropertySpec)
+        .build()
+
+
+    return DTOSpecs(dto, updateDto, dtoClassName, updateQueryDtoClassName)
+}
+
+data class DTOSpecs(
+    val dto: TypeSpec,
+    val updateQueryDto: TypeSpec,
+    val dtoClassName: ClassName,
+    val updateQueryDtoClassName: ClassName
+)
