@@ -8,9 +8,10 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import org.jetbrains.exposed.sql.Table
 
+
 @RestRepository
 class TestTable : Table() {
-    val id = integer("id")
+    val id = integer("id").autoIncrement()
     val name = varchar("name", 255)
 
     val surname = varchar("surname", 255).nullable()

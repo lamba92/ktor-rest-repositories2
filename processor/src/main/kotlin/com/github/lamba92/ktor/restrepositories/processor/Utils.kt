@@ -4,9 +4,9 @@ import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.*
 import com.squareup.kotlinpoet.*
+import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import com.squareup.kotlinpoet.ksp.toAnnotationSpec
 import com.squareup.kotlinpoet.ksp.toTypeName
-import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import java.util.*
@@ -31,7 +31,6 @@ fun ParameterSpec.Builder.copyKotlinxSerializationAnnotations(annotations: Seque
 
 
 data class ColumnDeclaration(val propertyDeclaration: KSPropertyDeclaration, val resolvedType: KSType)
-data class DTOPropertiesSpec(val originalColumnType: KSType, val property: PropertySpec, val parameter: ParameterSpec)
 
 fun Sequence<ColumnDeclaration>.generateDTOPropertiesSpecs() =
     map { (propertyDeclaration: KSPropertyDeclaration, resolvedType: KSType) ->
@@ -57,57 +56,31 @@ fun Resolver.forEachDeclaredTable(function: (KSClassDeclaration) -> Unit) =
         .filter { Table::class in it.superTypes }
         .forEach(function)
 
+fun String.decapitalize() = replaceFirstChar { it.lowercase(Locale.getDefault()) }
+
+
 fun String.capitalize() =
     replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
 
-fun <T> FileSpec.Builder.foldOn(iterables: Iterable<T>, action: (FileSpec.Builder, T) -> FileSpec.Builder) =
-    iterables.fold(this, action)
+fun <T, R> R.foldOn(iterable: Iterable<T>, operation: (R, T) -> R) =
+    iterable.fold(this, operation)
 
-fun generateDtos(
-    dtoClassName: ClassName,
-    updateQueryDtoClassName: ClassName,
-    properties: List<DTOPropertiesSpec>
-): DTOSpecs {
-    val dto = TypeSpec.classBuilder(dtoClassName)
-        .addModifiers(KModifier.DATA)
-        .addAnnotation(Serializable::class)
-        .primaryConstructor(
-            FunSpec.constructorBuilder()
-                .addParameters(properties.map { it.parameter })
-                .build()
-        )
-        .addProperties(properties.map { it.property })
-        .build()
-    val typeVariable = TypeVariableName("T")
-    val queryParamSpec = ParameterSpec("query", typeVariable)
-    val queryPropertySpec = PropertySpec.builder("query", typeVariable)
-        .initializer("query")
-        .build()
-    val updateParamSpec = ParameterSpec("update", dtoClassName)
-    val updatePropertySpec = PropertySpec.builder("update", dtoClassName)
-        .initializer("update")
-        .build()
-    val updateDto = TypeSpec.classBuilder(updateQueryDtoClassName)
-        .addModifiers(KModifier.DATA)
-        .addTypeVariable(typeVariable)
-        .addAnnotation(Serializable::class)
-        .primaryConstructor(
-            FunSpec.constructorBuilder()
-                .addParameter(queryParamSpec)
-                .addParameter(updateParamSpec)
-                .build()
-        )
-        .addProperty(queryPropertySpec)
-        .addProperty(updatePropertySpec)
-        .build()
+fun <T, R> R.foldIndexedOn(iterable: Iterable<T>, operation: (Int, R, T) -> R) =
+    iterable.foldIndexed(this, operation)
 
-
-    return DTOSpecs(dto, updateDto, dtoClassName, updateQueryDtoClassName)
-}
-
-data class DTOSpecs(
-    val dto: TypeSpec,
-    val updateQueryDto: TypeSpec,
-    val dtoClassName: ClassName,
-    val updateQueryDtoClassName: ClassName
+fun String.appendIfMissing(ending: String) =
+    if (endsWith(ending)) this else this + ending
+data class GeneratedQueryFunctions(
+    val insertSingle: FunSpec,
+    val insertBulk: FunSpec,
+    val selectBySingle: Map<ParameterSpec, FunSpec>,
+    val selectByMultiple: Map<ParameterSpec, FunSpec>,
+    val delete: Map<ParameterSpec, FunSpec>,
+    val update: Map<ParameterSpec, FunSpec>
 )
+
+fun TypeName.Companion.list(type: TypeName) =
+    ClassName("kotlin.collections", "List").parameterizedBy(type)
+
+fun String.appendIf(b: Boolean, s: String) =
+    if (b) this + s else this

@@ -8,6 +8,7 @@ import org.gradle.api.provider.Property
 import org.gradle.kotlin.dsl.*
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
+@Suppress("unused") // It's a plugin!
 class RestRepositoriesPlugin : Plugin<Project> {
 
     open class Extension(
@@ -26,13 +27,13 @@ class RestRepositoriesPlugin : Plugin<Project> {
     }
 
     override fun apply(target: Project): Unit = with(target) {
+        val extension = extensions.create<Extension>(
+            "restRepositories",
+            "restRepositories",
+            objects.property<Boolean>().apply { set(true) },
+            objects.property<String>().apply { set(REST_REPOSITORIES_VERSION) },
+        )
         plugins.withId("com.google.devtools.ksp") {
-            val extension = extensions.create<Extension>(
-                "restRepositories",
-                "restRepositories",
-                objects.property<Boolean>().apply { set(true) },
-                objects.property<String>().apply { set(REST_REPOSITORIES_VERSION) },
-            )
             afterEvaluate {
                 if (extension.addDependency.get()) {
                     val ksp: Configuration by configurations

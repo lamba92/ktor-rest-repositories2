@@ -1,25 +1,28 @@
+@file:Suppress("unused")
+
 package com.github.lamba92.ktor.restrepositories
 
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.routing.*
+import io.ktor.util.*
 import org.jetbrains.exposed.sql.Transaction
 
 
-data class RestRepositoriesRouteSetupKey(val path: String, val method: Endpoint)
+typealias RouteConfiguration = Route.() -> Unit
 
 class RestRepositoriesConfiguration {
-    val entitiesConfigurationMap: MutableMap<RestRepositoriesRouteSetupKey, Route.() -> Unit> = mutableMapOf()
+    internal val entitiesConfigurationMap: MutableMap<String, RouteConfiguration> = mutableMapOf()
 
-    internal val builtRoutes
-        get() = entitiesConfigurationMap.values.toList()
+    @InternalAPI
+    fun addConfiguration(path: String, configuration: RouteConfiguration) {
+        require(path !in entitiesConfigurationMap) {
+            "Table path \"$path\" is already set up."
+        }
+        entitiesConfigurationMap[path] = configuration
+    }
 
     var repositoryPath: String = "repositories"
-        set(value) {
-            assert(value.filter { !it.isWhitespace() }.isNotBlank()) { "Repository path cannot be blank or empty" }
-            field = value
-        }
 
 }
 
@@ -31,10 +34,12 @@ class EndpointsSetup<T : Any>(
     var tablePath: String
 ) {
 
-    val configuredMethods = mutableMapOf<Endpoint, EndpointBehaviour<T>>()
+    private val mutableConfiguredMethods = mutableMapOf<Endpoint, EndpointBehaviour<T>>()
+    val configuredMethods
+        get() = mutableConfiguredMethods.toMap()
 
     fun addEndpoint(endpoint: Endpoint, behaviourConfiguration: EndpointBehaviour<T>.() -> Unit = {}) {
-        configuredMethods[endpoint] = EndpointBehaviour<T>()
+        mutableConfiguredMethods[endpoint] = EndpointBehaviour<T>()
             .apply(behaviourConfiguration)
     }
 
@@ -53,11 +58,16 @@ data class EndpointBehaviour<T>(
 
 typealias RestRepositoryInterceptor<T> = suspend Transaction.(T) -> T
 
-val restRepositories
+val RestRepositories
     get() = createApplicationPlugin("restRepositories", ::RestRepositoriesConfiguration) {
+        val config = pluginConfig
+        val repositoryPath = config.repositoryPath.filter { !it.isWhitespace() }
+        require(repositoryPath.isNotEmpty()) { "Repository path is blank or empty" }
         application.routing {
-            get {
-
+            route(repositoryPath) {
+                config.entitiesConfigurationMap.forEach { (path, configuration) ->
+                    route(path, configuration)
+                }
             }
         }
     }

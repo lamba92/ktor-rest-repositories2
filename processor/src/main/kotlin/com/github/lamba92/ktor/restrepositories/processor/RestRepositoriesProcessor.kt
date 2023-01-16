@@ -2,22 +2,21 @@ package com.github.lamba92.ktor.restrepositories.processor
 
 import com.github.lamba92.ktor.restrepositories.Endpoint
 import com.github.lamba92.ktor.restrepositories.EndpointsSetup
-import com.github.lamba92.ktor.restrepositories.RestRepositoriesRouteSetupKey
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepository
+import com.github.lamba92.ktor.restrepositories.processor.endpoints.*
+import com.github.lamba92.ktor.restrepositories.processor.queries.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSFile
+import com.squareup.kotlinpoet.AnnotationSpec
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.writeTo
-import org.jetbrains.exposed.sql.Table
+import io.ktor.http.*
 
-class RestRepositoriesProcessor(
-    private val codeGenerator: CodeGenerator,
-    private val logger: KSPLogger
-) : SymbolProcessor {
+class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, ) : SymbolProcessor {
 
     companion object {
         val RestRepositoryFQN = RestRepository::class.qualifiedName!!
@@ -47,7 +46,7 @@ class RestRepositoriesProcessor(
                 dtoSpecs = dtoSpecs,
                 originatingFile = originatingFile
             )
-            val functions = writeFunctions(
+            val functions = writeQueries(
                 generatedPackageName = generatedPackageName,
                 dtoClassName = dtoClassName,
                 dtoPropertiesSpecs = dtoPropertiesSpecs,
@@ -70,7 +69,7 @@ class RestRepositoriesProcessor(
 
     private fun writeRoutes(
         tableTypeSpec: ClassName,
-        generatedFunctions: GeneratedFunctions,
+        generatedFunctions: GeneratedQueryFunctions,
         generatedPackageName: String,
         tableClassName: ClassName,
         originatingFile: KSFile,
@@ -102,6 +101,15 @@ class RestRepositoriesProcessor(
                     updateFunctionSpec = functionSpec
                 )
             }
+        val deleteRouteInstallSpec = generatedFunctions.delete
+            .map { (parameterSpec, functionSpec) ->
+                generateDeleteRouteFunctionSpecForParam(
+                    tableTypeSpec = tableTypeSpec,
+                    parameterSpec = parameterSpec,
+                    dtoSpecs = dtoSpecs,
+                    updateFunctionSpec = functionSpec
+                )
+            }
         val selectRouteFunctionSpec = generateRouteFunctionSpec(
             dtoClassName = dtoSpecs.dtoClassName,
             tableTypeSpec = tableTypeSpec,
@@ -115,7 +123,19 @@ class RestRepositoriesProcessor(
             functions = updateRouteInstallSpec,
             clauseName = "update"
         )
+        val deleteRouteFunctionSpec = generateRouteFunctionSpec(
+            dtoClassName = dtoSpecs.dtoClassName,
+            tableTypeSpec = tableTypeSpec,
+            functions = deleteRouteInstallSpec,
+            clauseName = "delete"
+        )
+        val optInCLassName = ClassName("kotlin", "OptIn")
         FileSpec.builder("$generatedPackageName.routes", "${tableClassName.simpleName}Routes")
+            .addAnnotation(
+                AnnotationSpec.builder(optInCLassName)
+                    .addMember("%T::class", ClassName("io.ktor.util", "InternalAPI"))
+                    .build()
+            )
             .addImport(dtoSpecs.dtoClassName.packageName, dtoSpecs.dtoClassName.simpleName)
             .addImport(dtoSpecs.updateQueryDtoClassName.packageName, dtoSpecs.updateQueryDtoClassName.simpleName)
             .addImport(
@@ -132,24 +152,26 @@ class RestRepositoriesProcessor(
             .foldOn(generatedFunctions.update.values) { acc, spec ->
                 acc.addImport("$generatedPackageName.queries", spec.name)
             }
+            .foldOn(generatedFunctions.delete.values) { acc, spec ->
+                acc.addImport("$generatedPackageName.queries", spec.name)
+            }
             .addImport("io.ktor.server.application", "call")
             .addImport("io.ktor.server.auth", "authenticate")
             .addImport("io.ktor.server.request", "receive")
             .addImport("io.ktor.server.response", "respond")
-            .addImport("io.ktor.server.routing", "Route", "put", "get", "post")
+            .addImport("io.ktor.http", HttpStatusCode::class.simpleName!!)
+            .addImport("io.ktor.server.routing", "Route", "put", "get", "post", "delete")
             .addImport("java.sql", "Connection")
-            .addImport(
-                RestRepositoriesRouteSetupKey::class.java.packageName,
-                RestRepositoriesRouteSetupKey::class.simpleName!!
-            )
             .addImport(EndpointsSetup::class.java.packageName, EndpointsSetup::class.simpleName!!)
             .addImport(Endpoint::class.java.packageName, Endpoint::class.simpleName!!)
             .addImport(EndpointsSetup::class.java.packageName, EndpointsSetup::class.simpleName!!)
             .addFunction(insertRouteInstallSpec)
             .foldOn(selectRouteInstallSpecs) { acc, spec -> acc.addFunction(spec) }
             .foldOn(updateRouteInstallSpec) { acc, spec -> acc.addFunction(spec) }
+            .foldOn(deleteRouteInstallSpec) { acc, spec -> acc.addFunction(spec) }
             .addFunction(selectRouteFunctionSpec)
             .addFunction(updateRouteFunctionSpec)
+            .addFunction(deleteRouteFunctionSpec)
             .addFunction(
                 generateTableEndpointSetup(
                     dtoClassName = dtoSpecs.dtoClassName,
@@ -157,24 +179,24 @@ class RestRepositoriesProcessor(
                     insertRouteInstallSpec = insertRouteInstallSpec,
                     selectRouteInstallSpec = selectRouteFunctionSpec,
                     updateRouteInstallSpec = updateRouteFunctionSpec,
-//                    deleteRouteInstallSpec = deleteRouteFunctionSpec,
+                    deleteRouteInstallSpec = deleteRouteFunctionSpec,
                 )
             )
             .build()
             .writeTo(codeGenerator, Dependencies(false, originatingFile))
     }
 
-    private fun writeFunctions(
+    private fun writeQueries(
         generatedPackageName: String,
         dtoClassName: ClassName,
         dtoPropertiesSpecs: List<DTOPropertiesSpec>,
         tableClassName: ClassName,
         originatingFile: KSFile
-    ): GeneratedFunctions {
+    ): GeneratedQueryFunctions {
         val allProperties = dtoPropertiesSpecs.map { it.parameter }
-        val functions = GeneratedFunctions(
+        val functions = GeneratedQueryFunctions(
             generateSingleInsert(dtoClassName, allProperties, tableClassName),
-            generateBulkSingleInsert(dtoClassName, allProperties, tableClassName),
+            generateBulkInsert(dtoClassName, allProperties, tableClassName),
             allProperties.associateWith {
                 generateSelectBySingleProperty(
                     dtoClassName = dtoClassName,
@@ -231,12 +253,6 @@ class RestRepositoriesProcessor(
 
 }
 
-
-object Users : Table() {
-    val id = varchar("id", 10) // Column<String>
-    val name = varchar("name", length = 50) // Column<String>
-//    val cityId = (integer("city_id") references Cities.id).nullable() // Column<Int?>
-}
 
 
 

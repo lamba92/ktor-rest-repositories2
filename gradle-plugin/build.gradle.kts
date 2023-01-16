@@ -32,7 +32,7 @@ dependencies {
     implementation(kotlin("gradle-plugin"))
 }
 
-val generatedOutputDir = buildDir.resolve("generated/kotlin")
+val generatedOutputDir = buildDir.resolve("generated/kotlin/main")
 
 kotlin.sourceSets.main {
     kotlin.srcDir(generatedOutputDir)
