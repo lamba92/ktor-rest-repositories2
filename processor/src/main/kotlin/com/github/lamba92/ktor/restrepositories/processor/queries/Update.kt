@@ -1,6 +1,6 @@
 package com.github.lamba92.ktor.restrepositories.processor.queries
 
-import com.github.lamba92.ktor.restrepositories.processor.DTOPropertiesSpec
+import com.github.lamba92.ktor.restrepositories.processor.DTOProperty
 import com.github.lamba92.ktor.restrepositories.processor.capitalize
 import com.github.lamba92.ktor.restrepositories.processor.foldOn
 import com.squareup.kotlinpoet.*
@@ -8,7 +8,7 @@ import org.jetbrains.exposed.sql.Transaction
 
 fun generateUpdateBySingleProperty(
     dtoClassName: ClassName,
-    dtoPropertiesSpecs: List<DTOPropertiesSpec>,
+    dtoPropertiesSpecs: List<DTOProperty>,
     tableTypeSpec: ClassName,
     dtoParameter: ParameterSpec,
 ) = FunSpec.builder("update${tableTypeSpec.simpleName}By${dtoParameter.name.capitalize()}")
@@ -20,12 +20,12 @@ fun generateUpdateBySingleProperty(
     .addCode(
         CodeBlock.builder()
             .beginControlFlow("return update({·${dtoParameter.name}·eq·parameter·})·{·statement·->")
-            .foldOn(dtoPropertiesSpecs) { acc, (originalColumnType, _, parameter) ->
-                val initial = acc.add("\t\tstatement[%N] = ", parameter)
-                if (originalColumnType.isMarkedNullable) initial.addStatement("dto.%N", parameter)
+            .foldOn(dtoPropertiesSpecs) { acc, next ->
+                val initial = acc.add("\t\tstatement[%N] = ", next.parameter)
+                if (next.originalColumnType.isMarkedNullable) initial.addStatement("dto.%N", next.parameter)
                 else initial.addStatement(
                     "requireNotNull(dto.%N) { \"%T.$%N is null\" }",
-                    parameter, dtoClassName, parameter
+                    next.parameter, dtoClassName, next.parameter
                 )
             }
             .endControlFlow()

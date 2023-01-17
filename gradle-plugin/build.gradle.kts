@@ -4,11 +4,8 @@ import com.squareup.kotlinpoet.FunSpec
 import com.squareup.kotlinpoet.PropertySpec
 
 buildscript {
-    repositories {
-        mavenCentral()
-    }
     dependencies {
-        classpath("com.squareup:kotlinpoet:1.12.0")
+        classpath(libs.kotlinpoet)
     }
 }
 

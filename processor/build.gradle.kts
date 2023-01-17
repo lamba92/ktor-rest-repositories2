@@ -1,15 +1,13 @@
 plugins {
-    kotlin("jvm")
+    alias(libs.plugins.kotlin.jvm)
 }
 
 dependencies {
-    implementation("com.google.devtools.ksp:symbol-processing-api:1.8.0-1.0.8")
-    val kotlinPoetVersion = "1.12.0"
-    api("com.squareup:kotlinpoet:$kotlinPoetVersion")
-    api("com.squareup:kotlinpoet-ksp:$kotlinPoetVersion")
+    implementation(libs.ksp.symbol.processing.api)
+    api(libs.kotlinpoet)
+    api(libs.kotlinpoet.ksp)
     api(projects.ktorPlugin)
-    api("org.jetbrains.exposed:exposed:0.17.14")
-    api("org.jetbrains.kotlinx:kotlinx-serialization-core:1.4.1")
+    api(libs.exposed.core)
 }
 
 kotlin {

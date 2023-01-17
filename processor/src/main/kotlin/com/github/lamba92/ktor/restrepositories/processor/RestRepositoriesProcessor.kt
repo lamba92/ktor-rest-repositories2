@@ -7,64 +7,49 @@ import com.github.lamba92.ktor.restrepositories.processor.endpoints.*
 import com.github.lamba92.ktor.restrepositories.processor.queries.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.KSAnnotated
-import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSFile
 import com.squareup.kotlinpoet.AnnotationSpec
 import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.FileSpec
-import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.writeTo
 import io.ktor.http.*
 
-class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, ) : SymbolProcessor {
+interface LoggerContext {
+    val logger: KSPLogger
+}
+
+class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, private val loggerContext: LoggerContext) : SymbolProcessor {
 
     companion object {
         val RestRepositoryFQN = RestRepository::class.qualifiedName!!
     }
 
-    override fun process(resolver: Resolver): List<KSAnnotated> {
-        resolver.forEachDeclaredTable { tableClassDeclaration: KSClassDeclaration ->
-            val originatingFile = tableClassDeclaration.containingFile ?: return@forEachDeclaredTable
-            val columnDeclarations = tableClassDeclaration.getDeclaredColumn()
-            val dtoPropertiesSpecs = columnDeclarations
-                .generateDTOPropertiesSpecs()
-                .toList()
-            val generatedPackageName = tableClassDeclaration.packageName.asString()
-            val dtoClassName = ClassName(
-                packageName = "$generatedPackageName.dto",
-                "${tableClassDeclaration.simpleName.asString().removeSuffix("s")}DTO"
-            )
-            val updateQueryDtoClassName = ClassName(
-                packageName = "$generatedPackageName.dto",
-                "${tableClassDeclaration.simpleName.asString().removeSuffix("s")}UpdateQueryDTO"
-            )
-            val dtoSpecs = generateDtos(dtoClassName, updateQueryDtoClassName, dtoPropertiesSpecs)
-            val tableTypeSpec = tableClassDeclaration.toClassName()
-            writeDtos(
-                generatedPackageName = generatedPackageName,
-                dtoClassName = dtoClassName,
-                dtoSpecs = dtoSpecs,
-                originatingFile = originatingFile
-            )
-            val functions = writeQueries(
-                generatedPackageName = generatedPackageName,
-                dtoClassName = dtoClassName,
-                dtoPropertiesSpecs = dtoPropertiesSpecs,
-                tableClassName = tableTypeSpec,
-                originatingFile = originatingFile
-            )
-            writeRoutes(
-                tableTypeSpec = tableTypeSpec,
-                generatedFunctions = functions,
-                generatedPackageName = generatedPackageName,
-                tableClassName = tableTypeSpec,
-                originatingFile = originatingFile,
-                dtoSpecs = dtoSpecs
-            )
-
-        }
-
-        return emptyList()
+    override fun process(resolver: Resolver): List<KSAnnotated> = with(loggerContext) {
+        resolver.getDeclaredTables()
+            .generateDTOSpecs()
+            .forEach { (tableDeclaration, dtoSpecs) ->
+                val originatingFile = tableDeclaration.declaration.containingFile
+                    ?: error("Unable to lookup file for ${tableDeclaration.className.canonicalName}")
+                writeDtos(
+                    rootPackageName = tableDeclaration.className.packageName,
+                    dtoSpecs = dtoSpecs,
+                    originatingFile = originatingFile
+                )
+                val functions = writeQueries(
+                    tableDeclaration = tableDeclaration,
+                    dtoSpecs = dtoSpecs,
+                    originatingFile = originatingFile
+                )
+//                writeRoutes(
+//                    tableTypeSpec = tableTypeSpec,
+//                    generatedFunctions = functions,
+//                    generatedPackageName = generatedPackageName,
+//                    tableClassName = tableTypeSpec,
+//                    originatingFile = originatingFile,
+//                    dtoSpecs = dtoSpecs
+//                )
+            }
+        emptyList()
     }
 
     private fun writeRoutes(
@@ -187,15 +172,12 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, ) : Sy
     }
 
     private fun writeQueries(
-        generatedPackageName: String,
-        dtoClassName: ClassName,
-        dtoPropertiesSpecs: List<DTOPropertiesSpec>,
-        tableClassName: ClassName,
+        tableDeclaration: TableDeclaration,
+        dtoSpecs: DTOSpecs,
         originatingFile: KSFile
     ): GeneratedQueryFunctions {
-        val allProperties = dtoPropertiesSpecs.map { it.parameter }
         val functions = GeneratedQueryFunctions(
-            generateSingleInsert(dtoClassName, allProperties, tableClassName),
+            generateSingleInsert(tableDeclaration, dtoSpecs, map),
             generateBulkInsert(dtoClassName, allProperties, tableClassName),
             allProperties.associateWith {
                 generateSelectBySingleProperty(
@@ -228,6 +210,7 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, ) : Sy
                 "org.jetbrains.exposed.sql",
                 "insert", "Transaction", "select", "deleteWhere", "update"
             )
+            .addImport("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
             .addImport(dtoClassName.packageName, dtoClassName.simpleName)
             .addFunction(functions.insertSingle)
             .addFunction(functions.insertBulk)
@@ -241,11 +224,10 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, ) : Sy
     }
 
     private fun writeDtos(
-        generatedPackageName: String,
-        dtoClassName: ClassName,
+        rootPackageName: String,
         dtoSpecs: DTOSpecs,
         originatingFile: KSFile
-    ) = FileSpec.builder("$generatedPackageName.dto", dtoClassName.simpleName)
+    ) = FileSpec.builder("$rootPackageName.dto", dtoSpecs.dtoClassName.simpleName)
         .addType(dtoSpecs.dto)
         .addType(dtoSpecs.updateQueryDto)
         .build()

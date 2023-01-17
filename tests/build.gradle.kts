@@ -1,7 +1,7 @@
 plugins {
-    kotlin("plugin.serialization")
-    kotlin("jvm")
-    id("com.google.devtools.ksp")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlinx.serialization)
+    alias(libs.plugins.ksp)
     id("io.ktor.plugins.restrepositories")
 }
 
@@ -10,14 +10,11 @@ restRepositories {
 }
 
 dependencies {
-    val jupyterVersion = "5.9.2"
-
-    implementation("org.jetbrains.exposed:exposed:0.17.14")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.4.1")
+    implementation(libs.exposed.core)
+    implementation(libs.kotlinx.serialization.core)
     implementation(projects.ktorPlugin)
     ksp(projects.processor)
-    testImplementation("org.junit.jupiter:junit-jupiter-api:$jupyterVersion")
+    testImplementation(libs.junit.jupiter.api)
     testImplementation(kotlin("test-junit5"))
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:$jupyterVersion")
+    testRuntimeOnly(libs.junit.jupiter.engine)
 }
-
