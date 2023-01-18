@@ -15,12 +15,14 @@ sealed interface DTOProperty {
     val property: PropertySpec
     val parameter: ParameterSpec
     val declaration: KSPropertyDeclaration
+    val declarationSimpleName: String
 
     data class Simple(
         override val originalColumnType: KSType,
         override val property: PropertySpec,
         override val parameter: ParameterSpec,
-        override val declaration: KSPropertyDeclaration
+        override val declaration: KSPropertyDeclaration,
+        override val declarationSimpleName: String = declaration.simpleName.asString()
     ) : DTOProperty
 
     data class WithReference(
@@ -28,7 +30,8 @@ sealed interface DTOProperty {
         override val property: PropertySpec,
         override val parameter: ParameterSpec,
         override val declaration: KSPropertyDeclaration,
-        val reference: Reference
+        val reference: Reference,
+        override val declarationSimpleName: String = declaration.simpleName.asString()
     ) : DTOProperty {
         data class Reference(
             val dtoSpec: DTOSpecs,
@@ -83,9 +86,11 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                     "${tableDeclaration.providedSingularName}UpdateQuery"
                 )
                 val generateDtos = generateDtos(tableDeclaration, dtoClassName, updateQueryDtoClassName, dtoPropertiesSpecs)
+                val insertSingle = generateSingleInsert(generateDtos, map)
                 val generatedQueries = GeneratedQueryFunctions(
-                    generateSingleInsert(generateDtos, map),
-                    generateBulkInsert(generateDtos, map)
+                    insertSingle,
+//                    generateBulkInsert(generateDtos, insertSingle),
+
                 )
                 tableDeclaration to DTOSpecs.WithFunctions(generateDtos, generatedQueries)
             }
@@ -164,7 +169,8 @@ fun generateDtos(tableDeclaration: TableDeclaration,
         updateQueryDto = updateDto,
         dtoClassName = dtoClassName,
         updateQueryDtoClassName = updateQueryDtoClassName,
-        properties = properties.associateBy { it.declaration.simpleName.asString() })
+        properties = properties
+    )
 }
 
 data class DTOSpecs(
@@ -173,7 +179,7 @@ data class DTOSpecs(
     val updateQueryDto: TypeSpec,
     val dtoClassName: ClassName,
     val updateQueryDtoClassName: ClassName,
-    val properties: Map<String, DTOProperty>
+    val properties: List<DTOProperty>
 ) {
     data class WithFunctions(val specs: DTOSpecs, val functions: GeneratedQueryFunctions)
 }

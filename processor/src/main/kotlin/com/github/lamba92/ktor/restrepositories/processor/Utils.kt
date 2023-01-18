@@ -144,11 +144,11 @@ fun Resolver.getDeclaredTables() =
             val providedSingularName = arguments
                 ?.first()
                 ?.value as? String
-                ?: it.simpleName.asString().removeSuffix("s")
+                ?: it.simpleName.asString().removeSuffix("Table")
             val providedPluralName = arguments
                 ?.first()
                 ?.value as? String
-                ?: it.simpleName.asString().appendIfMissing("s")
+                ?: it.simpleName.asString().appendIfMissing("Table")
             TableDeclaration(it, providedSingularName, providedPluralName)
         }
 
@@ -169,11 +169,11 @@ fun String.appendIfMissing(ending: String) =
 
 data class GeneratedQueryFunctions(
     val insertSingle: FunSpec,
-    val insertBulk: FunSpec,
-    val selectBySingle: Map<ParameterSpec, FunSpec>,
-    val selectByMultiple: Map<ParameterSpec, FunSpec>,
-    val delete: Map<ParameterSpec, FunSpec>,
-    val update: Map<ParameterSpec, FunSpec>
+//    val insertBulk: FunSpec,
+//    val selectBySingle: Map<ParameterSpec, FunSpec>,
+//    val selectByMultiple: Map<ParameterSpec, FunSpec>,
+//    val delete: Map<ParameterSpec, FunSpec>,
+//    val update: Map<ParameterSpec, FunSpec>
 )
 
 fun TypeName.Companion.list(type: TypeName) =
