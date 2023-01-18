@@ -101,7 +101,7 @@ fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
     val queue = dtoSpecs.properties
         .filterIsInstance<DTOProperty.WithReference>()
         .toMutableList()
-    val tables = mutableListOf(dtoSpecs.tableDeclaration)
+    val tables = mutableSetOf(dtoSpecs.tableDeclaration)
     while (queue.isNotEmpty()) {
         val next = queue.removeAt(0).reference
         tables.add(next.tableDeclaration)

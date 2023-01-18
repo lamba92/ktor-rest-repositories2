@@ -176,7 +176,7 @@ data class GeneratedQueryFunctions(
     val insertSingle: FunSpec,
     val insertBulk: FunSpec,
     val selectBySingle: Map<String, FunSpec>,
-//    val selectByMultiple: Map<ParameterSpec, FunSpec>,
+    val selectByMultiple: Map<String, FunSpec>,
 //    val delete: Map<ParameterSpec, FunSpec>,
 //    val update: Map<ParameterSpec, FunSpec>
 )

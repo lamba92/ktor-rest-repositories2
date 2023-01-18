@@ -3,6 +3,7 @@ package com.github.lamba92.ktor.restrepositories.tests
 import com.github.lamba92.ktor.restrepositories.annotations.Reference
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepository
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepositoryName
+import com.github.lamba92.ktor.restrepositories.tests.CityTable.references
 import org.jetbrains.exposed.sql.Table
 
 @RestRepository
@@ -15,6 +16,9 @@ object UserTable : Table() {
 
     @Reference(CityTable::class, "id", "city")
     val cityId = integer("cityId").references(CityTable.id).nullable()
+
+    @Reference(TestReferenceTable::class, "id", "test")
+    val testId = integer("testId").references(TestReferenceTable.id)
 
     override val primaryKey = PrimaryKey(email, name = "PK_email")
 }

@@ -47,6 +47,9 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, privat
                     .foldOn(dtoSpecs.functions.selectBySingle.values) { acc, next ->
                         acc.addFunction(next)
                     }
+                    .foldOn(dtoSpecs.functions.selectByMultiple.values) { acc, next ->
+                        acc.addFunction(next)
+                    }
                     .build()
                     .writeTo(codeGenerator, Dependencies(false, originatingFile))
 //                val functions = writeQueries(

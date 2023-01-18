@@ -1,6 +1,7 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
 import com.github.lamba92.ktor.restrepositories.processor.queries.generateBulkInsert
+import com.github.lamba92.ktor.restrepositories.processor.queries.generateSelectByMultipleProperties
 import com.github.lamba92.ktor.restrepositories.processor.queries.generateSelectBySingleProperty
 import com.github.lamba92.ktor.restrepositories.processor.queries.generateSingleInsert
 import com.google.devtools.ksp.symbol.KSClassDeclaration
@@ -88,12 +89,17 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                 )
                 val dtoSpecs = generateDtos(tableDeclaration, dtoClassName, updateQueryDtoClassName, dtoProperties)
                 val insertSingle = generateSingleInsert(dtoSpecs, map)
+                val selectSpecs = dtoProperties
+                    .filterIsInstance<DTOProperty.Simple>()
+                    .associate {
+                        val generateSelectBySingleProperty = generateSelectBySingleProperty(dtoSpecs, it, map)
+                        it.declarationSimpleName to Pair(generateSelectBySingleProperty, generateSelectByMultipleProperties(dtoSpecs, it, generateSelectBySingleProperty))
+                    }
                 val generatedQueries = GeneratedQueryFunctions(
                     insertSingle,
                     generateBulkInsert(dtoSpecs, insertSingle),
-                    dtoProperties
-                        .filterIsInstance<DTOProperty.Simple>()
-                        .associate { it.declarationSimpleName to generateSelectBySingleProperty(dtoSpecs, it, map) }
+                    selectSpecs.mapValues { it.value.first },
+                    selectSpecs.mapValues { it.value.second },
                 )
                 tableDeclaration to DTOSpecs.WithFunctions(dtoSpecs, generatedQueries)
             }
@@ -127,7 +133,8 @@ private fun <K, V> Map<K, V>.partition(partition: (K, V) -> Boolean) =
         .partition { (k, v) -> partition(k, v) }
         .let { it.first.toMap() to it.second.toMap() }
 
-fun generateDtos(tableDeclaration: TableDeclaration,
+fun generateDtos(
+    tableDeclaration: TableDeclaration,
     dtoClassName: ClassName,
     updateQueryDtoClassName: ClassName,
     properties: List<DTOProperty>

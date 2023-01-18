@@ -1,8 +1,9 @@
 package com.github.lamba92.ktor.restrepositories.processor.queries
 
 import com.github.lamba92.ktor.restrepositories.processor.*
-import com.squareup.kotlinpoet.*
-import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
+import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.FunSpec
+import com.squareup.kotlinpoet.ParameterSpec
 import org.jetbrains.exposed.sql.Transaction
 
 /*
@@ -14,6 +15,7 @@ params: queryParam, tableA. tableB
         referenced = selectReferencedByReferencedParam(statement[tableA.referencedParam], tableB)
     )
 */
+
 
 context(LoggerContext)
 fun generateSelectBySingleProperty(
@@ -45,10 +47,16 @@ fun generateSelectBySingleProperty(
                 is DTOProperty.WithReference -> {
                     val insertSpec = map.getValue(next.reference.tableDeclaration)
                         .functions.selectBySingle.getValue(next.reference.propertyName)
+                    val isNullable = next.declaration.type.resolve().arguments
+                        .first().type!!.resolve().isMarkedNullable
                     val tables = insertSpec.parameters.drop(1)
                     tablesToAdd.addAll(tables)
-                    acc.addStatement("\t%N = %N(", next.property, insertSpec)
-                        .addStatement(format = "\t\tparameter = statement[%N.%L],", tableParameter, next.declarationSimpleName)
+                    if (!isNullable) acc.addStatement("\t%N = %N(", next.property, insertSpec)
+                        .addStatement(
+                            format = "\t\tparameter = statement[%N.%L],",
+                            tableParameter,
+                            next.declarationSimpleName
+                        )
                         .foldOn(tables) { acc, tableParamSpec ->
                             acc.addStatement(
                                 "\t\t%N = %N".appendIf(index != tables.lastIndex, ","),
@@ -56,6 +64,21 @@ fun generateSelectBySingleProperty(
                             )
                         }
                         .addStatement("\t)")
+                    else acc.beginControlFlow(
+                        "\t%N = statement[%N.%L]?.let {",
+                        next.property, tableParameter, next.declarationSimpleName
+                    )
+                        .addStatement("\t%N(", insertSpec)
+                        .addStatement("\t\tparameter = it,")
+                        .foldOn(tables) { acc, tableParamSpec ->
+                            acc.addStatement(
+                                "\t\t%N = %N".appendIf(index != tables.lastIndex, ","),
+                                tableParamSpec, tableParamSpec
+                            )
+                        }
+                        .addStatement("\t)")
+                        .endControlFlow()
+                        .run { if (index != dtoSpecs.properties.lastIndex) addStatement(",") else this }
                 }
             }
 
@@ -69,34 +92,28 @@ fun generateSelectBySingleProperty(
 }
 
 fun generateSelectByMultipleProperties(
-    dtoClassName: ClassName,
-    parameter: ParameterSpec,
-    allParameters: List<ParameterSpec>,
-    tableTypeSpec: ClassName
-) = FunSpec.builder(
-    "select${tableTypeSpec.simpleName.appendIfMissing("s")}By${
-        parameter.name.capitalize().appendIfMissing("s")
-    }"
-)
-    .contextReceivers(Transaction::class.asTypeName())
-    .receiver(tableTypeSpec)
-    .addParameter(
-        "parameters",
-        ClassName("kotlin.collections", "List")
-            .parameterizedBy(parameter.type.copy(nullable = false))
-    )
-    .returns(TypeName.list(dtoClassName))
-    .addCode(buildString {
-        appendLine("// Query for a list of ${parameter.name.appendIfMissing("s")}")
-        appendLine("return select { ${parameter.name} inList parameters }")
-        appendLine("\t.map {")
-        appendLine("\t\t${dtoClassName.simpleName}(")
-        allParameters.forEachIndexed { index, param ->
-            append("\t\t\tit[${param.name}]")
-            if (index != allParameters.lastIndex) appendLine(",")
-            else appendLine()
+    dtoSpecs: DTOSpecs,
+    dtoProperty: DTOProperty,
+    selectSingle: FunSpec
+): FunSpec {
+    val tables = selectSingle.parameters.drop(1)
+    val codeBlock = CodeBlock.builder()
+        .beginControlFlow("return parameters.map { ")
+        .addStatement("%N(", selectSingle)
+        .addStatement("\tparameter = it,")
+        .foldIndexedOn(tables) { index, acc, next ->
+            acc.addStatement("\t%N = %N".appendIf(index != tables.lastIndex, ","), next, next)
         }
-        appendLine("\t\t)")
-        appendLine("}")
-    })
-    .build()
+        .addStatement(")")
+        .endControlFlow()
+        .build()
+    val cPluralName = dtoSpecs.tableDeclaration.providedPluralName.capitalize()
+    val cPropertyName = dtoProperty.declarationSimpleName.capitalize()
+    return FunSpec.builder("select${cPluralName}By$cPropertyName")
+        .contextReceiver<Transaction>()
+        .addParameter("parameters", dtoProperty.parameter.type.copy(nullable = false).list())
+        .addParameters(tables)
+        .returns(dtoSpecs.dtoClassName.list())
+        .addCode(codeBlock)
+        .build()
+}
