@@ -32,7 +32,6 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, privat
                     dtoSpecs = dtoSpecs.specs,
                     originatingFile = originatingFile
                 )
-                logger.warn(dtoSpecs.functions.insertSingle.toString())
                 FileSpec.builder(
                     "${tableDeclaration.className.packageName}.queries",
                     "${tableDeclaration.className.simpleName}Queries"
@@ -44,6 +43,10 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, privat
                     .addImport("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
                     .addImport(dtoSpecs.specs.dtoClassName.packageName, dtoSpecs.specs.dtoClassName.simpleName)
                     .addFunction(dtoSpecs.functions.insertSingle)
+                    .addFunction(dtoSpecs.functions.insertBulk)
+                    .foldOn(dtoSpecs.functions.selectBySingle.values) { acc, next ->
+                        acc.addFunction(next)
+                    }
                     .build()
                     .writeTo(codeGenerator, Dependencies(false, originatingFile))
 //                val functions = writeQueries(

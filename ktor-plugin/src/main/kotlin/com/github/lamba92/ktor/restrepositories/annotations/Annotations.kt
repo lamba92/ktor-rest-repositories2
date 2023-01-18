@@ -16,7 +16,7 @@ annotation class RestRepository
 annotation class RestRepositoryName(val singular: String, val plural: String)
 
 /**
- * Marks a [Column] property as a foreign key for another [Table].
+ * Marks a [Column] property as a foreign key for a primary key of another [Table].
  * Note, you will still need to invoke `reference` on the property such as:
  * ```kotlin
  * @RestRepository
@@ -44,8 +44,12 @@ annotation class RestRepositoryName(val singular: String, val plural: String)
  * @param columnName The name of the parameter in the referenced [table].
  *      NOTE: This is the name of the parameter in the Kotlin code of the table,
  *      not the name of the column in the database.
- * @param name the property name on the serialized JSON.
+ * @param jsonParameterName the property name on the serialized JSON.
  */
 @Retention(AnnotationRetention.SOURCE)
 @Target(AnnotationTarget.PROPERTY)
-annotation class Reference(val table: KClass<out Table>, val columnName: String, val name: String)
+annotation class Reference(
+    val table: KClass<out Table>,
+    val columnName: String,
+    val jsonParameterName: String
+)

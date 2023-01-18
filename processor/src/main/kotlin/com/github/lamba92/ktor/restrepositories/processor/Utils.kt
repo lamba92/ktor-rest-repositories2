@@ -2,6 +2,7 @@ package com.github.lamba92.ktor.restrepositories.processor
 
 import com.github.lamba92.ktor.restrepositories.annotations.Reference
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepositoryName
+import com.google.devtools.ksp.getAnnotationsByType
 import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.*
@@ -48,18 +49,23 @@ fun ColumnDeclaration(propertyDeclaration: KSPropertyDeclaration): ColumnDeclara
     val annotationArguments = propertyDeclaration.annotations.filterAnnotationsOfType<Reference>()
         .firstOrNull()
         ?.arguments
-    val referencedTableClassName = (annotationArguments?.first()?.value as? KSType)?.toClassName()
-    val referencedParameterName = annotationArguments?.get(1)?.value as? String
-    val jsonParameterName = annotationArguments?.get(2)?.value as? String
-    return if (referencedTableClassName != null && referencedParameterName != null && jsonParameterName != null)
+
+    // DO NO ACCESS reference.table, it will throw because the referenced table has not yet been
+    // compiled, hence there is no way to instantiate a class not yet compiled
+    val annotation = propertyDeclaration.getAnnotationsByType(Reference::class).firstOrNull()
+    // but you can read the source with KSP, so it's fine...
+    val referencedTableClassName = (annotationArguments?.get(0)?.value as? KSType)?.toClassName()
+    return if (referencedTableClassName != null && annotation != null) {
         ColumnDeclaration.WithReference(
             declaration = propertyDeclaration,
             resolvedType = resolvedType,
-            referencedTableClassname = referencedTableClassName,
-            referencedPropertyName = referencedParameterName,
-            referencedJsonParameterName = jsonParameterName
-
+            reference = ColumnDeclaration.WithReference.Reference(
+                tableClassName = referencedTableClassName,
+                columnName = annotation.columnName,
+                jsonParameterName = annotation.jsonParameterName
+            )
         )
+    }
     else ColumnDeclaration.Simple(propertyDeclaration, resolvedType)
 }
 
@@ -78,11 +84,15 @@ sealed interface ColumnDeclaration {
     data class WithReference(
         override val declaration: KSPropertyDeclaration,
         override val resolvedType: KSType,
-        val referencedTableClassname: ClassName,
-        val referencedPropertyName: String,
-        val referencedJsonParameterName: String,
+        val reference: Reference,
         override val simpleName: String = declaration.simpleName.asString()
-    ) : ColumnDeclaration
+    ) : ColumnDeclaration {
+        data class Reference(
+            val tableClassName: ClassName,
+            val columnName: String,
+            val jsonParameterName: String
+        )
+    }
 }
 
 fun ColumnDeclaration.Simple.generateDTOPropertiesSpecs(): DTOProperty.Simple {
@@ -101,10 +111,10 @@ fun ColumnDeclaration.WithReference.generateDTOPropertiesSpecs(
     referencedTableDeclaration: TableDeclaration
 ): DTOProperty.WithReference {
     val type = referencedDtoSpec.dtoClassName.copy(nullable = true)
-    val propertySpecBuilder = PropertySpec.builder(referencedJsonParameterName, type)
-    val parameterSpecBuilder = ParameterSpec.builder(referencedJsonParameterName, type)
+    val propertySpecBuilder = PropertySpec.builder(reference.jsonParameterName, type)
+    val parameterSpecBuilder = ParameterSpec.builder(reference.jsonParameterName, type)
         .defaultValue("null")
-    propertySpecBuilder.initializer(referencedJsonParameterName)
+    propertySpecBuilder.initializer(reference.jsonParameterName)
     return DTOProperty.WithReference(
         originalColumnType = resolvedType.arguments.first().type!!.resolve(),
         property = propertySpecBuilder.build(),
@@ -112,17 +122,12 @@ fun ColumnDeclaration.WithReference.generateDTOPropertiesSpecs(
         declaration = declaration,
         reference = DTOProperty.WithReference.Reference(
             dtoSpec = referencedDtoSpec,
-            propertyName = referencedPropertyName,
-            referencedJsonParameterName = referencedJsonParameterName,
+            propertyName = reference.columnName,
+            referencedJsonParameterName = reference.jsonParameterName,
             tableDeclaration = referencedTableDeclaration
         )
     )
 }
-
-private data class ColumnDeclarationCommonInfo(
-    val propertySpecBuilder: PropertySpec.Builder,
-    val parameterSpecBuilder: ParameterSpec.Builder
-)
 
 context(LoggerContext)
 fun TableDeclaration.getDeclaredColumn() = declaration
@@ -169,8 +174,8 @@ fun String.appendIfMissing(ending: String) =
 
 data class GeneratedQueryFunctions(
     val insertSingle: FunSpec,
-//    val insertBulk: FunSpec,
-//    val selectBySingle: Map<ParameterSpec, FunSpec>,
+    val insertBulk: FunSpec,
+    val selectBySingle: Map<String, FunSpec>,
 //    val selectByMultiple: Map<ParameterSpec, FunSpec>,
 //    val delete: Map<ParameterSpec, FunSpec>,
 //    val update: Map<ParameterSpec, FunSpec>
@@ -181,3 +186,6 @@ fun TypeName.Companion.list(type: TypeName) =
 
 fun String.appendIf(b: Boolean, s: String) =
     if (b) this + s else this
+
+fun <T : TypeName> T.list() = TypeName.list(this)
+fun ClassName.asParameter() = ParameterSpec(simpleName.decapitalize(), this)

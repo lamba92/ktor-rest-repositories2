@@ -2,7 +2,8 @@ package com.github.lamba92.ktor.restrepositories.processor.queries
 
 import com.github.lamba92.ktor.restrepositories.processor.*
 import com.squareup.kotlinpoet.*
-import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.Column
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.Transaction
 
 /*
@@ -115,14 +116,13 @@ fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
     }
     return FunSpec.builder("insert")
         .contextReceiver<Transaction>()
-        .receiver(dtoSpecs.tableDeclaration.className)
         .addParameter(ParameterSpec.builder("dtos", returnType).build())
         .foldOn(tableParams) { acc, next ->
             acc.addParameter(next)
         }
         .addCode(
             CodeBlock.builder()
-                .addStatement("return dtos.map { %N(it, ", singleInsertSpec)
+                .add("return dtos.map { %N(it, ", singleInsertSpec)
                 .foldIndexedOn(tableParams) { index, acc, next ->
                     acc.add("%N".appendIf(index != tableParams.lastIndex, ", "), next)
                 }

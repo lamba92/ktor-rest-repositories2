@@ -1,6 +1,7 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
 import com.github.lamba92.ktor.restrepositories.processor.queries.generateBulkInsert
+import com.github.lamba92.ktor.restrepositories.processor.queries.generateSelectBySingleProperty
 import com.github.lamba92.ktor.restrepositories.processor.queries.generateSingleInsert
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
@@ -37,7 +38,7 @@ sealed interface DTOProperty {
             val dtoSpec: DTOSpecs,
             val propertyName: String,
             val tableDeclaration: TableDeclaration,
-            val referencedJsonParameterName: String
+            val referencedJsonParameterName: String,
         )
     }
 }
@@ -62,12 +63,12 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
     while (next.isNotEmpty()) {
         val newDTOSpecs = next
             .mapNotNull { (tableDeclaration, columnDeclarations) ->
-                val dtoPropertiesSpecs = columnDeclarations.map {
+                val dtoProperties = columnDeclarations.map {
                     when (it) {
                         is ColumnDeclaration.Simple -> it.generateDTOPropertiesSpecs()
                         is ColumnDeclaration.WithReference -> {
                             val referencedTableDeclaration = tableLookupMap
-                                .getValue(it.referencedTableClassname.canonicalName)
+                                .getValue(it.reference.tableClassName.canonicalName)
                             it.generateDTOPropertiesSpecs(
                                 referencedDtoSpec = map.getValue(referencedTableDeclaration).specs,
                                 referencedTableDeclaration = referencedTableDeclaration
@@ -75,7 +76,7 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                         }
                     }
                 }
-                if (dtoPropertiesSpecs.isEmpty()) return@mapNotNull null
+                if (dtoProperties.isEmpty()) return@mapNotNull null
                 val generatedPackageName = tableDeclaration.declaration.packageName.asString()
                 val dtoClassName = ClassName(
                     packageName = "$generatedPackageName.dto",
@@ -85,14 +86,16 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                     packageName = "$generatedPackageName.dto",
                     "${tableDeclaration.providedSingularName}UpdateQuery"
                 )
-                val generateDtos = generateDtos(tableDeclaration, dtoClassName, updateQueryDtoClassName, dtoPropertiesSpecs)
-                val insertSingle = generateSingleInsert(generateDtos, map)
+                val dtoSpecs = generateDtos(tableDeclaration, dtoClassName, updateQueryDtoClassName, dtoProperties)
+                val insertSingle = generateSingleInsert(dtoSpecs, map)
                 val generatedQueries = GeneratedQueryFunctions(
                     insertSingle,
-//                    generateBulkInsert(generateDtos, insertSingle),
-
+                    generateBulkInsert(dtoSpecs, insertSingle),
+                    dtoProperties
+                        .filterIsInstance<DTOProperty.Simple>()
+                        .associate { it.declarationSimpleName to generateSelectBySingleProperty(dtoSpecs, it, map) }
                 )
-                tableDeclaration to DTOSpecs.WithFunctions(generateDtos, generatedQueries)
+                tableDeclaration to DTOSpecs.WithFunctions(dtoSpecs, generatedQueries)
             }
             .toMap()
 
@@ -101,7 +104,7 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
         next = queue.filter { (_, columnDeclarations) ->
             columnDeclarations
                 .filterIsInstance<ColumnDeclaration.WithReference>()
-                .map { tableLookupMap.getValue(it.referencedTableClassname.canonicalName) }
+                .map { tableLookupMap.getValue(it.reference.tableClassName.canonicalName) }
                 .all { it in map }
         }
         // we remove the next from the queue
