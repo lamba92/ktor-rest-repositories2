@@ -1,9 +1,7 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
-import com.github.lamba92.ktor.restrepositories.processor.queries.generateBulkInsert
-import com.github.lamba92.ktor.restrepositories.processor.queries.generateSelectByMultipleProperties
-import com.github.lamba92.ktor.restrepositories.processor.queries.generateSelectBySingleProperty
-import com.github.lamba92.ktor.restrepositories.processor.queries.generateSingleInsert
+import com.github.lamba92.ktor.restrepositories.processor.endpoints.generateUpdateRouteFunctionSpecForParam
+import com.github.lamba92.ktor.restrepositories.processor.queries.*
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.google.devtools.ksp.symbol.KSType
@@ -93,13 +91,29 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                     .filterIsInstance<DTOProperty.Simple>()
                     .associate {
                         val generateSelectBySingleProperty = generateSelectBySingleProperty(dtoSpecs, it, map)
-                        it.declarationSimpleName to Pair(generateSelectBySingleProperty, generateSelectByMultipleProperties(dtoSpecs, it, generateSelectBySingleProperty))
+                        it.declarationSimpleName to Pair(
+                            generateSelectBySingleProperty,
+                            generateSelectByMultipleProperties(dtoSpecs, it, generateSelectBySingleProperty)
+                        )
+                    }
+                val update = dtoProperties
+                    .filterIsInstance<DTOProperty.Simple>()
+                    .associate {
+                        it.declarationSimpleName to generateUpdateBySingleProperty(
+                            dtoSpecs,
+                            it,
+                            map
+                        )
                     }
                 val generatedQueries = GeneratedQueryFunctions(
                     insertSingle,
                     generateBulkInsert(dtoSpecs, insertSingle),
                     selectSpecs.mapValues { it.value.first },
                     selectSpecs.mapValues { it.value.second },
+                    dtoProperties.associate {
+                        it.declarationSimpleName to generateDeleteBySingleProperty(it.parameter, )
+                    }
+                    update
                 )
                 tableDeclaration to DTOSpecs.WithFunctions(dtoSpecs, generatedQueries)
             }
@@ -118,7 +132,7 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
 
         // if there is nothing more to process next but the queue has still values
         // it means that there are cyclic references somewhere
-        if (next.isEmpty() && queue.isNotEmpty()) error(buildString {
+        if (next.isEmpty() && queue.isNotEmpty()) logger.warn(buildString {
             appendLine("There is a cyclic @Reference in one of those tables: ")
             queue.keys.forEach {
                 appendLine("\n\t - ${it.className.canonicalName}")

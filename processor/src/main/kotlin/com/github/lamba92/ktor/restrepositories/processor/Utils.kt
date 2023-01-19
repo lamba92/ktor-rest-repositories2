@@ -177,8 +177,8 @@ data class GeneratedQueryFunctions(
     val insertBulk: FunSpec,
     val selectBySingle: Map<String, FunSpec>,
     val selectByMultiple: Map<String, FunSpec>,
-//    val delete: Map<ParameterSpec, FunSpec>,
-//    val update: Map<ParameterSpec, FunSpec>
+    val delete: Map<String, FunSpec>,
+    val update: Map<String, FunSpec>
 )
 
 fun TypeName.Companion.list(type: TypeName) =
@@ -188,4 +188,19 @@ fun String.appendIf(b: Boolean, s: String) =
     if (b) this + s else this
 
 fun <T : TypeName> T.list() = TypeName.list(this)
+
 fun ClassName.asParameter() = ParameterSpec(simpleName.decapitalize(), this)
+fun TableDeclaration.asParameter() = className.asParameter()
+
+fun CodeBlock.Builder.endControlFlow(format: String, vararg args: Any) = apply {
+    unindent()
+    add("}$format\n", args)
+}
+
+inline fun <reified T> FunSpec.Builder.returns() = returns(T::class)
+
+fun DTOSpecs.asParameter() = ParameterSpec("dto", dtoClassName)
+
+fun ParameterSpec.asList() = ParameterSpec(name, type.list(), modifiers)
+
+fun <T> MutableCollection<T>.addAll(vararg elements: T) = addAll(elements.toList())

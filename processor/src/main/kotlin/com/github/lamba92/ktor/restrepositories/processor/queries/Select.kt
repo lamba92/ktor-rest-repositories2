@@ -37,10 +37,11 @@ fun generateSelectBySingleProperty(
             tableParameter, tableParameter, dtoProperty.declarationSimpleName
         )
         .addStatement("return %T(", dtoSpecs.dtoClassName)
+        .indent()
         .foldIndexedOn(dtoSpecs.properties) { index, acc, next ->
             when (next) {
                 is DTOProperty.Simple -> acc.addStatement(
-                    "\t%N = statement[%N.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
+                    "%N = statement[%N.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
                     next.property, tableParameter, next.property
                 )
 
@@ -51,38 +52,42 @@ fun generateSelectBySingleProperty(
                         .first().type!!.resolve().isMarkedNullable
                     val tables = insertSpec.parameters.drop(1)
                     tablesToAdd.addAll(tables)
-                    if (!isNullable) acc.addStatement("\t%N = %N(", next.property, insertSpec)
+                    if (!isNullable) acc.addStatement("%N = %N(", next.property, insertSpec)
+                        .indent()
                         .addStatement(
-                            format = "\t\tparameter = statement[%N.%L],",
+                            format = "parameter = statement[%N.%L],",
                             tableParameter,
                             next.declarationSimpleName
                         )
                         .foldOn(tables) { acc, tableParamSpec ->
                             acc.addStatement(
-                                "\t\t%N = %N".appendIf(index != tables.lastIndex, ","),
+                                "%N = %N".appendIf(index != tables.lastIndex, ","),
                                 tableParamSpec, tableParamSpec
                             )
                         }
-                        .addStatement("\t)")
+                        .unindent()
+                        .addStatement(")")
                     else acc.beginControlFlow(
-                        "\t%N = statement[%N.%L]?.let {",
+                        "%N = statement[%N.%L]?.let {",
                         next.property, tableParameter, next.declarationSimpleName
                     )
-                        .addStatement("\t%N(", insertSpec)
-                        .addStatement("\t\tparameter = it,")
+                        .addStatement("%N(", insertSpec)
+                        .indent()
+                        .addStatement("parameter = it,")
                         .foldOn(tables) { acc, tableParamSpec ->
                             acc.addStatement(
-                                "\t\t%N = %N".appendIf(index != tables.lastIndex, ","),
+                                "%N = %N".appendIf(index != tables.lastIndex, ","),
                                 tableParamSpec, tableParamSpec
                             )
                         }
-                        .addStatement("\t)")
-                        .endControlFlow()
-                        .run { if (index != dtoSpecs.properties.lastIndex) addStatement(",") else this }
+                        .unindent()
+                        .addStatement(")")
+                        .endControlFlow(if (index != dtoSpecs.properties.lastIndex) "," else "")
                 }
             }
 
         }
+        .unindent()
         .addStatement(")")
         .build()
     return funSpec
@@ -100,10 +105,12 @@ fun generateSelectByMultipleProperties(
     val codeBlock = CodeBlock.builder()
         .beginControlFlow("return parameters.map { ")
         .addStatement("%N(", selectSingle)
-        .addStatement("\tparameter = it,")
+        .indent()
+        .addStatement("parameter = it,")
         .foldIndexedOn(tables) { index, acc, next ->
-            acc.addStatement("\t%N = %N".appendIf(index != tables.lastIndex, ","), next, next)
+            acc.addStatement("%N = %N".appendIf(index != tables.lastIndex, ","), next, next)
         }
+        .unindent()
         .addStatement(")")
         .endControlFlow()
         .build()

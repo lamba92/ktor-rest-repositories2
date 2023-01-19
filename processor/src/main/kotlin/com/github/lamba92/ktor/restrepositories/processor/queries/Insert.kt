@@ -24,7 +24,7 @@ fun generateSingleInsert(
 ): FunSpec {
     val mainTableParamName = dtoSpecs.tableDeclaration.className.simpleName.decapitalize()
     val funSpec = FunSpec.builder("insert")
-        .contextReceivers(Transaction::class.asTypeName())
+        .contextReceiver<Transaction>()
         .addParameter(ParameterSpec.builder("dto", dtoSpecs.dtoClassName).build())
         .addParameter(mainTableParamName, dtoSpecs.tableDeclaration.className)
     val queue = mutableListOf<PropertyQueueElement>()
@@ -60,35 +60,38 @@ fun generateSingleInsert(
             dtoProperty.reference.referencedJsonParameterName, dtoProperty.property
         )
         codeBlock.addStatement("%N(", specsWithFunctions.functions.insertSingle)
-        codeBlock.addStatement("\tdto = it,")
+            .indent()
+            .addStatement("dto = it,")
         specsWithFunctions.functions.insertSingle
             .parameters
             .filter { it.type != dtoProperty.property.type.copy(nullable = false) }
             .forEachIndexed { index, insertParameter ->
                 tables.add(insertParameter)
                 codeBlock.addStatement(
-                    "\t%N = %N".appendIf(index != specsWithFunctions.functions.insertSingle.parameters.size - 2, ","),
+                    "%N = %N".appendIf(index != specsWithFunctions.functions.insertSingle.parameters.size - 2, ","),
                     insertParameter, insertParameter
                 )
             }
-        codeBlock.addStatement(")")
+        codeBlock.unindent().addStatement(")")
         codeBlock.endControlFlow()
     }
     funSpec.addParameters(tables)
     codeBlock
         .addStatement("return %T(", dtoSpecs.dtoClassName)
+        .indent()
         .foldIndexedOn(dtoSpecs.properties) { index, acc, next ->
             when (next) {
                 is DTOProperty.Simple -> acc.addStatement(
-                    "\t%N = insertStatement[%L.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
+                    "%N = insertStatement[%L.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
                     next.property, mainTableParamName, next.property
                 )
                 is DTOProperty.WithReference -> acc.addStatement(
-                    "\t%L = %N".appendIf(index != dtoSpecs.properties.lastIndex, ","),
+                    "%L = %N".appendIf(index != dtoSpecs.properties.lastIndex, ","),
                     next.reference.referencedJsonParameterName, next.property
                 )
             }
         }
+        .unindent()
         .addStatement(")")
     return funSpec
         .addCode(codeBlock.build())
