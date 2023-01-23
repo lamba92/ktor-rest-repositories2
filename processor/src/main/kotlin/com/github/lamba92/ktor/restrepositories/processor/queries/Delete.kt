@@ -1,19 +1,23 @@
 package com.github.lamba92.ktor.restrepositories.processor.queries
 
-import com.github.lamba92.ktor.restrepositories.processor.DTOSpecs
-import com.github.lamba92.ktor.restrepositories.processor.appendIfMissing
-import com.github.lamba92.ktor.restrepositories.processor.capitalize
+import com.github.lamba92.ktor.restrepositories.processor.*
 import com.squareup.kotlinpoet.*
 import org.jetbrains.exposed.sql.Transaction
 
 fun generateDeleteBySingleProperty(
-    parameter: ParameterSpec,
+    property: DTOProperty,
     dtoSpecs: DTOSpecs,
-) = FunSpec
-    .builder("delete${dtoSpecs.tableDeclaration.providedPluralName}By${parameter.name.capitalize()}")
-    .contextReceiver<Transaction>()
-    .addParameter("parameter", parameter.type.copy(nullable = false))
-    .returns(Int::class)
-    .addCode(CodeBlock.of("return deleteWhere{·${parameter.name}·eq·parameter·}"))
-    .build()
+): FunSpec {
+    return FunSpec
+        .builder("delete${dtoSpecs.tableDeclaration.names.plural}By${property.declarationSimpleName.capitalize()}")
+        .contextReceiver<Transaction>()
+        .addParameter(property.declarationSimpleName, property.parameter.type.copy(nullable = false))
+        .addParameter(dtoSpecs.tableDeclaration.parameter)
+        .addCode(CodeBlock.of(
+            "%N.deleteWhere·{·%N.%L·eq·%L·}",
+            dtoSpecs.tableDeclaration.parameter, dtoSpecs.tableDeclaration.parameter,
+            property.declarationSimpleName, property.declarationSimpleName
+        ))
+        .build()
+}
 

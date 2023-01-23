@@ -2,8 +2,6 @@ package com.github.lamba92.ktor.restrepositories.processor.queries
 
 import com.github.lamba92.ktor.restrepositories.processor.*
 import com.squareup.kotlinpoet.*
-import org.jetbrains.exposed.sql.Column
-import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.Transaction
 
 /*
@@ -22,21 +20,22 @@ fun generateSingleInsert(
     dtoSpecs: DTOSpecs,
     map: MutableMap<TableDeclaration, DTOSpecs.WithFunctions>
 ): FunSpec {
-    val mainTableParamName = dtoSpecs.tableDeclaration.className.simpleName.decapitalize()
     val funSpec = FunSpec.builder("insert")
         .contextReceiver<Transaction>()
-        .addParameter(ParameterSpec.builder("dto", dtoSpecs.dtoClassName).build())
-        .addParameter(mainTableParamName, dtoSpecs.tableDeclaration.className)
+        .addParameter(dtoSpecs.parameter)
+        .addParameter(dtoSpecs.tableDeclaration.parameter)
     val queue = mutableListOf<PropertyQueueElement>()
     val codeBlock = CodeBlock.builder()
-        .beginControlFlow("val insertStatement = %L.insert {", mainTableParamName)
+        .beginControlFlow("val insertStatement = %N.insert {", dtoSpecs.tableDeclaration.parameter)
         .foldOn(dtoSpecs.properties) { acc, dtoProperty ->
             val cName = dtoProperty.parameter.name.capitalize()
             when (dtoProperty) {
                 is DTOProperty.Simple -> acc.addStatement(
-                    format = "dto.%N?.let { dto%L -> it[%L.%L] = dto%L }",
-                    dtoProperty.property, cName, mainTableParamName, dtoProperty.declarationSimpleName, cName
+                    format = "%N.%N?.let { dto%L -> it[%N.%L] = dto%L }",
+                    dtoSpecs.parameter, dtoProperty.property, cName, dtoSpecs.tableDeclaration.parameter,
+                    dtoProperty.declarationSimpleName, cName
                 )
+
                 is DTOProperty.WithReference -> {
                     queue.add(
                         PropertyQueueElement(
@@ -45,9 +44,12 @@ fun generateSingleInsert(
                         )
                     )
                     acc.addStatement(
-                        format = "dto.%N?.%N?.let { dto%L -> it[%L.%N] = dto%L }",
-                        dtoProperty.property, dtoProperty.reference.propertyName, dtoProperty.declarationSimpleName.capitalize(),
-                        mainTableParamName, dtoProperty.declarationSimpleName, dtoProperty.declarationSimpleName.capitalize()
+                        format = "%N.%N?.%N?.let { dto%L -> it[%N.%N] = dto%L }",
+                        dtoSpecs.parameter,
+                        dtoProperty.property, dtoProperty.reference.propertyName,
+                        dtoProperty.declarationSimpleName.capitalize(),
+                        dtoSpecs.tableDeclaration.parameter, dtoProperty.declarationSimpleName,
+                        dtoProperty.declarationSimpleName.capitalize()
                     )
                 }
             }
@@ -56,12 +58,12 @@ fun generateSingleInsert(
     val tables = mutableSetOf<ParameterSpec>()
     queue.forEach { (dtoProperty, specsWithFunctions) ->
         codeBlock.beginControlFlow(
-            "val %L = dto.%N?.let {",
-            dtoProperty.reference.referencedJsonParameterName, dtoProperty.property
+            "val %L = %N.%N?.let {",
+            dtoProperty.reference.referencedJsonParameterName, dtoSpecs.parameter, dtoProperty.property
         )
         codeBlock.addStatement("%N(", specsWithFunctions.functions.insertSingle)
             .indent()
-            .addStatement("dto = it,")
+            .addStatement("%N = it,", dtoProperty.reference.dtoSpec.parameter)
         specsWithFunctions.functions.insertSingle
             .parameters
             .filter { it.type != dtoProperty.property.type.copy(nullable = false) }
@@ -77,14 +79,15 @@ fun generateSingleInsert(
     }
     funSpec.addParameters(tables)
     codeBlock
-        .addStatement("return %T(", dtoSpecs.dtoClassName)
+        .addStatement("return %T(", dtoSpecs.className)
         .indent()
         .foldIndexedOn(dtoSpecs.properties) { index, acc, next ->
             when (next) {
                 is DTOProperty.Simple -> acc.addStatement(
-                    "%N = insertStatement[%L.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
-                    next.property, mainTableParamName, next.property
+                    "%N = insertStatement[%N.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
+                    next.property, dtoSpecs.tableDeclaration.parameter, next.property
                 )
+
                 is DTOProperty.WithReference -> acc.addStatement(
                     "%L = %N".appendIf(index != dtoSpecs.properties.lastIndex, ","),
                     next.reference.referencedJsonParameterName, next.property
@@ -95,12 +98,12 @@ fun generateSingleInsert(
         .addStatement(")")
     return funSpec
         .addCode(codeBlock.build())
-        .returns(dtoSpecs.dtoClassName)
+        .returns(dtoSpecs.className)
         .build()
 }
 
 fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
-    val returnType = TypeName.list(dtoSpecs.dtoClassName)
+    val returnType = TypeName.list(dtoSpecs.className)
     val queue = dtoSpecs.properties
         .filterIsInstance<DTOProperty.WithReference>()
         .toMutableList()
@@ -110,19 +113,11 @@ fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
         tables.add(next.tableDeclaration)
         queue.addAll(next.dtoSpec.properties.filterIsInstance<DTOProperty.WithReference>())
     }
-    val tableParams = tables.map {
-        ParameterSpec.builder(
-            name = it.className.simpleName.decapitalize(),
-            type = it.className
-        )
-            .build()
-    }
+    val tableParams = tables.map { it.parameter }
     return FunSpec.builder("insert")
         .contextReceiver<Transaction>()
         .addParameter(ParameterSpec.builder("dtos", returnType).build())
-        .foldOn(tableParams) { acc, next ->
-            acc.addParameter(next)
-        }
+        .addParameters(tableParams)
         .addCode(
             CodeBlock.builder()
                 .add("return dtos.map { %N(it, ", singleInsertSpec)

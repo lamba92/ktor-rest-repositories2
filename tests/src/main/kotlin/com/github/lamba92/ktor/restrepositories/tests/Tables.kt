@@ -3,7 +3,6 @@ package com.github.lamba92.ktor.restrepositories.tests
 import com.github.lamba92.ktor.restrepositories.annotations.Reference
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepository
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepositoryName
-import com.github.lamba92.ktor.restrepositories.tests.CityTable.references
 import org.jetbrains.exposed.sql.Table
 
 @RestRepository

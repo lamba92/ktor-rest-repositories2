@@ -19,7 +19,7 @@ fun generateUpdateRouteFunctionSpecForParam(
 ): FunSpec {
     val nonNullableParameterSpecType = parameterSpec.type.copy(nullable = false)
     val getSingleContent: CodeBlockTransform = {
-        it.addStatement("val updateDto = call.receive<%T>()", dtoSpecs.updateQueryDtoClassName.parameterizedBy(nonNullableParameterSpecType))
+        it.addStatement("val updateDto = call.receive<%T>()", dtoSpecs.updateQueryClassName.parameterizedBy(nonNullableParameterSpecType))
             .beginControlFlow("newSuspendedTransaction(db = database) {")
             .addStatement("val intercepted = behaviour.restRepositoryInterceptor(this, updateDto.update)")
             .addStatement("table.%N(updateDto.query, intercepted)", updateFunctionSpec)
@@ -36,7 +36,7 @@ fun generateUpdateRouteFunctionSpecForParam(
         .receiver(Route::class)
         .addParameter("table", tableTypeSpec)
         .addParameter("database", Database::class)
-        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpecs.dtoClassName))
+        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpecs.className))
         .addCode(generateAuthCode(getCheckAuthCode, getCheckAuthCode))
         .build()
 }

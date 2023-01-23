@@ -1,56 +1,11 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
-import com.github.lamba92.ktor.restrepositories.processor.endpoints.generateUpdateRouteFunctionSpecForParam
 import com.github.lamba92.ktor.restrepositories.processor.queries.*
-import com.google.devtools.ksp.symbol.KSClassDeclaration
-import com.google.devtools.ksp.symbol.KSPropertyDeclaration
-import com.google.devtools.ksp.symbol.KSType
 import com.squareup.kotlinpoet.*
-import com.squareup.kotlinpoet.ksp.toClassName
 import kotlinx.serialization.Serializable
 
-sealed interface DTOProperty {
-
-    val originalColumnType: KSType
-    val property: PropertySpec
-    val parameter: ParameterSpec
-    val declaration: KSPropertyDeclaration
-    val declarationSimpleName: String
-
-    data class Simple(
-        override val originalColumnType: KSType,
-        override val property: PropertySpec,
-        override val parameter: ParameterSpec,
-        override val declaration: KSPropertyDeclaration,
-        override val declarationSimpleName: String = declaration.simpleName.asString()
-    ) : DTOProperty
-
-    data class WithReference(
-        override val originalColumnType: KSType,
-        override val property: PropertySpec,
-        override val parameter: ParameterSpec,
-        override val declaration: KSPropertyDeclaration,
-        val reference: Reference,
-        override val declarationSimpleName: String = declaration.simpleName.asString()
-    ) : DTOProperty {
-        data class Reference(
-            val dtoSpec: DTOSpecs,
-            val propertyName: String,
-            val tableDeclaration: TableDeclaration,
-            val referencedJsonParameterName: String,
-        )
-    }
-}
-
-data class TableDeclaration(
-    val declaration: KSClassDeclaration,
-    val providedSingularName: String,
-    val providedPluralName: String,
-    val className: ClassName = declaration.toClassName()
-)
-
 context(LoggerContext)
-fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpecs.WithFunctions> {
+fun Sequence<TableDeclaration>.generateDTOSpecs(): List<DTOSpecs.WithFunctions> {
     val tableLookupMap = associateBy { it.className.canonicalName }
     val map = mutableMapOf<TableDeclaration, DTOSpecs.WithFunctions>()
     // get the raw column declarations
@@ -79,11 +34,11 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                 val generatedPackageName = tableDeclaration.declaration.packageName.asString()
                 val dtoClassName = ClassName(
                     packageName = "$generatedPackageName.dto",
-                    tableDeclaration.providedSingularName
+                    tableDeclaration.names.singular
                 )
                 val updateQueryDtoClassName = ClassName(
                     packageName = "$generatedPackageName.dto",
-                    "${tableDeclaration.providedSingularName}UpdateQuery"
+                    "${tableDeclaration.names.plural}UpdateQuery"
                 )
                 val dtoSpecs = generateDtos(tableDeclaration, dtoClassName, updateQueryDtoClassName, dtoProperties)
                 val insertSingle = generateSingleInsert(dtoSpecs, map)
@@ -100,20 +55,23 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
                     .filterIsInstance<DTOProperty.Simple>()
                     .associate {
                         it.declarationSimpleName to generateUpdateBySingleProperty(
-                            dtoSpecs,
-                            it,
-                            map
+                            dtoSpecs = dtoSpecs,
+                            dtoProperty = it,
+                            map = map
                         )
                     }
-                val generatedQueries = GeneratedQueryFunctions(
-                    insertSingle,
-                    generateBulkInsert(dtoSpecs, insertSingle),
-                    selectSpecs.mapValues { it.value.first },
-                    selectSpecs.mapValues { it.value.second },
-                    dtoProperties.associate {
-                        it.declarationSimpleName to generateDeleteBySingleProperty(it.parameter, )
+                val delete = dtoProperties
+                    .filterIsInstance<DTOProperty.Simple>()
+                    .associate {
+                        it.declarationSimpleName to generateDeleteBySingleProperty(it, dtoSpecs)
                     }
-                    update
+                val generatedQueries = GeneratedQueryFunctions(
+                    insertSingle = insertSingle,
+                    insertBulk = generateBulkInsert(dtoSpecs, insertSingle),
+                    selectBySingle = selectSpecs.mapValues { it.value.first },
+                    selectByMultiple = selectSpecs.mapValues { it.value.second },
+                    delete = delete,
+                    update = update
                 )
                 tableDeclaration to DTOSpecs.WithFunctions(dtoSpecs, generatedQueries)
             }
@@ -139,13 +97,8 @@ fun Sequence<TableDeclaration>.generateDTOSpecs(): Map<TableDeclaration, DTOSpec
             }
         })
     }
-    return map.toMap()
+    return map.values.toList()
 }
-
-private fun <K, V> Map<K, V>.partition(partition: (K, V) -> Boolean) =
-    entries.map { Pair(it.key, it.value) }
-        .partition { (k, v) -> partition(k, v) }
-        .let { it.first.toMap() to it.second.toMap() }
 
 fun generateDtos(
     tableDeclaration: TableDeclaration,
@@ -191,19 +144,9 @@ fun generateDtos(
         tableDeclaration = tableDeclaration,
         dto = dto,
         updateQueryDto = updateDto,
-        dtoClassName = dtoClassName,
-        updateQueryDtoClassName = updateQueryDtoClassName,
+        className = dtoClassName,
+        updateQueryClassName = updateQueryDtoClassName,
         properties = properties
     )
 }
 
-data class DTOSpecs(
-    val tableDeclaration: TableDeclaration,
-    val dto: TypeSpec,
-    val updateQueryDto: TypeSpec,
-    val dtoClassName: ClassName,
-    val updateQueryDtoClassName: ClassName,
-    val properties: List<DTOProperty>
-) {
-    data class WithFunctions(val specs: DTOSpecs, val functions: GeneratedQueryFunctions)
-}

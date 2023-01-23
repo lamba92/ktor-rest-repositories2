@@ -1,3 +1,5 @@
+@file:Suppress("NAME_SHADOWING")
+
 package com.github.lamba92.ktor.restrepositories.processor.queries
 
 import com.github.lamba92.ktor.restrepositories.processor.*
@@ -21,9 +23,8 @@ fun generateUpdateBySingleProperty(
     dtoProperty: DTOProperty,
     map: MutableMap<TableDeclaration, DTOSpecs.WithFunctions>,
 ): FunSpec {
-    val mainTablePropertySpec = dtoSpecs.tableDeclaration.className.asParameter()
-    val dtoParameterSpec = dtoSpecs.asParameter()
-    val providedSingularName = dtoSpecs.tableDeclaration.providedSingularName
+    val mainTablePropertySpec = dtoSpecs.tableDeclaration.parameter
+    val providedSingularName = dtoSpecs.tableDeclaration.names.singular
     val cDtoName = dtoProperty.declarationSimpleName.capitalize()
     val tables = mutableListOf<PropertyQueueElement>()
 
@@ -35,15 +36,15 @@ fun generateUpdateBySingleProperty(
         .foldOn(propertiesWithReference) { acc, next ->
             acc.addStatement(
                 "val %LDto = requireNotNull(%N.%L) { \"%L.%L is null\" }",
-                next.reference.referencedJsonParameterName, dtoParameterSpec,
-                next.reference.referencedJsonParameterName, dtoSpecs.dtoClassName.simpleName,
+                next.reference.referencedJsonParameterName, dtoSpecs.parameter,
+                next.reference.referencedJsonParameterName, dtoSpecs.className.simpleName,
                 next.reference.referencedJsonParameterName
             )
                 .addStatement(
                     "val %LDto%L = requireNotNull(%LDto.%L) { \"%L.%L.%L is null\" }",
                     next.reference.referencedJsonParameterName, next.reference.propertyName.capitalize(),
                     next.reference.referencedJsonParameterName, next.reference.propertyName,
-                    dtoSpecs.dtoClassName.simpleName, next.reference.referencedJsonParameterName,
+                    dtoSpecs.className.simpleName, next.reference.referencedJsonParameterName,
                     next.reference.propertyName
                 )
         }
@@ -68,7 +69,7 @@ fun generateUpdateBySingleProperty(
                             .addStatement(
                                 "\trequireNotNull(%N.%N) { \"%L.%N is null\" }",
                                 mainTablePropertySpec, next.declarationSimpleName,
-                                dtoSpecs.dtoClassName.simpleName, next.declarationSimpleName
+                                dtoSpecs.className.simpleName, next.declarationSimpleName
                             )
                     }
                 }
@@ -79,7 +80,7 @@ fun generateUpdateBySingleProperty(
                         acc.addStatement(
                             "statement[%N.%L] = %N.%L?.%L",
                             mainTablePropertySpec, next.declarationSimpleName,
-                            dtoParameterSpec, next.reference.referencedJsonParameterName,
+                            dtoSpecs.parameter, next.reference.referencedJsonParameterName,
                             next.reference.propertyName
                         )
                     } else {
@@ -100,14 +101,14 @@ fun generateUpdateBySingleProperty(
             if (referencedProperty.originalColumnType.isMarkedNullable) {
                 acc.beginControlFlow(
                     "%N.%L?.let {",
-                    dtoParameterSpec, referencedProperty.reference.referencedJsonParameterName
+                    dtoSpecs.parameter, referencedProperty.reference.referencedJsonParameterName
                 )
                     .addStatement("%N(", updateSpecByParam)
                     .indent()
-                    .addStatement("dto = it,")
+                    .addStatement("%N = it,", updateSpecByParam.parameters.first())
                     .addStatement("%L = requireNotNull(it.%L) { \"%L.%L.%L\" },",
                         referencedProperty.reference.propertyName, referencedProperty.reference.propertyName,
-                        dtoSpecs.dtoClassName.simpleName, referencedProperty.reference.referencedJsonParameterName,
+                        dtoSpecs.className.simpleName, referencedProperty.reference.referencedJsonParameterName,
                         referencedProperty.reference.propertyName
                     )
                     .foldIndexedOn(params) { index, acc, next ->
@@ -120,7 +121,8 @@ fun generateUpdateBySingleProperty(
                 acc.addStatement("%N(", updateSpecByParam)
                     .indent()
                     .addStatement(
-                        "dto = %LDto,",
+                        "%N = %LDto,",
+                        updateSpecByParam.parameters.first(),
                         referencedProperty.reference.referencedJsonParameterName,
                     )
                     .addStatement(
@@ -140,13 +142,13 @@ fun generateUpdateBySingleProperty(
     return FunSpec
         .builder("update${providedSingularName}By$cDtoName")
         .contextReceiver<Transaction>()
-        .addParameter(dtoParameterSpec)
+        .addParameter(dtoSpecs.parameter)
         .addParameter(dtoProperty.parameter.nonNullable())
         .addParameter(mainTablePropertySpec)
-        .addParameters(tables.map { it.specWithFunctions.specs.tableDeclaration.asParameter() })
+        .addParameters(tables.map { it.specWithFunctions.specs.tableDeclaration.parameter })
         .addCode(codeBlock)
         .build()
 }
 
-private fun ParameterSpec.nonNullable() = ParameterSpec(name, type.copy(nullable = false), modifiers)
+fun ParameterSpec.nonNullable() = ParameterSpec(name, type.copy(nullable = false), modifiers)
 

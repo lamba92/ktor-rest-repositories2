@@ -69,32 +69,6 @@ fun ColumnDeclaration(propertyDeclaration: KSPropertyDeclaration): ColumnDeclara
     else ColumnDeclaration.Simple(propertyDeclaration, resolvedType)
 }
 
-sealed interface ColumnDeclaration {
-
-    val declaration: KSPropertyDeclaration
-    val resolvedType: KSType
-    val simpleName: String
-
-    data class Simple(
-        override val declaration: KSPropertyDeclaration,
-        override val resolvedType: KSType,
-        override val simpleName: String = declaration.simpleName.asString()
-    ) : ColumnDeclaration
-
-    data class WithReference(
-        override val declaration: KSPropertyDeclaration,
-        override val resolvedType: KSType,
-        val reference: Reference,
-        override val simpleName: String = declaration.simpleName.asString()
-    ) : ColumnDeclaration {
-        data class Reference(
-            val tableClassName: ClassName,
-            val columnName: String,
-            val jsonParameterName: String
-        )
-    }
-}
-
 fun ColumnDeclaration.Simple.generateDTOPropertiesSpecs(): DTOProperty.Simple {
     val name = declaration.simpleName.asString()
     val type1 = resolvedType.arguments.first().type!!.resolve()
@@ -110,7 +84,7 @@ fun ColumnDeclaration.WithReference.generateDTOPropertiesSpecs(
     referencedDtoSpec: DTOSpecs,
     referencedTableDeclaration: TableDeclaration
 ): DTOProperty.WithReference {
-    val type = referencedDtoSpec.dtoClassName.copy(nullable = true)
+    val type = referencedDtoSpec.className.copy(nullable = true)
     val propertySpecBuilder = PropertySpec.builder(reference.jsonParameterName, type)
     val parameterSpecBuilder = ParameterSpec.builder(reference.jsonParameterName, type)
         .defaultValue("null")
@@ -154,7 +128,7 @@ fun Resolver.getDeclaredTables() =
                 ?.first()
                 ?.value as? String
                 ?: it.simpleName.asString().appendIfMissing("Table")
-            TableDeclaration(it, providedSingularName, providedPluralName)
+            TableDeclaration(it, RestRepositoryName(providedSingularName, providedPluralName))
         }
 
 fun String.decapitalize() = replaceFirstChar { it.lowercase(Locale.getDefault()) }
@@ -172,15 +146,6 @@ fun <T, R> R.foldIndexedOn(iterable: Iterable<T>, operation: (Int, R, T) -> R) =
 fun String.appendIfMissing(ending: String) =
     if (endsWith(ending)) this else this + ending
 
-data class GeneratedQueryFunctions(
-    val insertSingle: FunSpec,
-    val insertBulk: FunSpec,
-    val selectBySingle: Map<String, FunSpec>,
-    val selectByMultiple: Map<String, FunSpec>,
-    val delete: Map<String, FunSpec>,
-    val update: Map<String, FunSpec>
-)
-
 fun TypeName.Companion.list(type: TypeName) =
     ClassName("kotlin.collections", "List").parameterizedBy(type)
 
@@ -190,7 +155,6 @@ fun String.appendIf(b: Boolean, s: String) =
 fun <T : TypeName> T.list() = TypeName.list(this)
 
 fun ClassName.asParameter() = ParameterSpec(simpleName.decapitalize(), this)
-fun TableDeclaration.asParameter() = className.asParameter()
 
 fun CodeBlock.Builder.endControlFlow(format: String, vararg args: Any) = apply {
     unindent()
@@ -199,8 +163,11 @@ fun CodeBlock.Builder.endControlFlow(format: String, vararg args: Any) = apply {
 
 inline fun <reified T> FunSpec.Builder.returns() = returns(T::class)
 
-fun DTOSpecs.asParameter() = ParameterSpec("dto", dtoClassName)
-
 fun ParameterSpec.asList() = ParameterSpec(name, type.list(), modifiers)
 
 fun <T> MutableCollection<T>.addAll(vararg elements: T) = addAll(elements.toList())
+
+fun <K, V> Map<K, V>.partition(partition: (K, V) -> Boolean) =
+    entries.map { Pair(it.key, it.value) }
+        .partition { (k, v) -> partition(k, v) }
+        .let { it.first.toMap() to it.second.toMap() }

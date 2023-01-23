@@ -1,18 +1,11 @@
 package com.github.lamba92.ktor.restrepositories.processor
 
 import com.github.lamba92.ktor.restrepositories.annotations.RestRepository
-import com.github.lamba92.ktor.restrepositories.processor.endpoints.*
-import com.github.lamba92.ktor.restrepositories.processor.queries.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSFile
 import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.ksp.writeTo
-import io.ktor.http.*
-
-interface LoggerContext {
-    val logger: KSPLogger
-}
 
 class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, private val loggerContext: LoggerContext) :
     SymbolProcessor {
@@ -24,52 +17,45 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, privat
     override fun process(resolver: Resolver): List<KSAnnotated> = with(loggerContext) {
         resolver.getDeclaredTables()
             .generateDTOSpecs()
-            .forEach { (tableDeclaration, dtoSpecs) ->
-                val originatingFile = tableDeclaration.declaration.containingFile
-                    ?: error("Unable to lookup file for ${tableDeclaration.className.canonicalName}")
-                writeDtos(
-                    rootPackageName = tableDeclaration.className.packageName,
-                    dtoSpecs = dtoSpecs.specs,
-                    originatingFile = originatingFile
-                )
-                FileSpec.builder(
-                    "${tableDeclaration.className.packageName}.queries",
-                    "${tableDeclaration.className.simpleName}Queries"
-                )
-                    .addImport(
-                        "org.jetbrains.exposed.sql",
-                        "insert", "Transaction", "select", "deleteWhere", "update"
-                    )
-                    .addImport("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
-                    .addImport(dtoSpecs.specs.dtoClassName.packageName, dtoSpecs.specs.dtoClassName.simpleName)
-                    .addFunction(dtoSpecs.functions.insertSingle)
-                    .addFunction(dtoSpecs.functions.insertBulk)
-                    .foldOn(dtoSpecs.functions.selectBySingle.values) { acc, next ->
-                        acc.addFunction(next)
-                    }
-                    .foldOn(dtoSpecs.functions.selectByMultiple.values) { acc, next ->
-                        acc.addFunction(next)
-                    }
-                    .foldOn(dtoSpecs.functions.update.values) { acc, next ->
-                        acc.addFunction(next)
-                    }
-                    .build()
-                    .writeTo(codeGenerator, Dependencies(false, originatingFile))
-//                val functions = writeQueries(
-//                    tableDeclaration = tableDeclaration,
-//                    dtoSpecs = dtoSpecs,
-//                    originatingFile = originatingFile
-//                )
-//                writeRoutes(
-//                    tableTypeSpec = tableTypeSpec,
-//                    generatedFunctions = functions,
-//                    generatedPackageName = generatedPackageName,
-//                    tableClassName = tableTypeSpec,
-//                    originatingFile = originatingFile,
-//                    dtoSpecs = dtoSpecs
-//                )
+            .forEach { dtoSpecs ->
+                val originatingFile = dtoSpecs.specs.tableDeclaration.declaration.containingFile
+                    ?: error("Unable to lookup file for ${dtoSpecs.specs.tableDeclaration.className.canonicalName}")
+                writeDtos(dtoSpecs.specs, originatingFile)
+                writeQueries(dtoSpecs, originatingFile)
             }
         emptyList()
+    }
+
+    private fun writeQueries(
+        dtoSpecs: DTOSpecs.WithFunctions,
+        originatingFile: KSFile
+    ) {
+        FileSpec.builder(
+            "${dtoSpecs.specs.tableDeclaration.className.packageName}.queries",
+            "${dtoSpecs.specs.tableDeclaration.className.simpleName}Queries"
+        )
+            .addImport(
+                "org.jetbrains.exposed.sql",
+                "insert", "Transaction", "select", "deleteWhere", "update"
+            )
+            .addImport("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
+            .addImport(dtoSpecs.specs.className.packageName, dtoSpecs.specs.className.simpleName)
+            .addFunction(dtoSpecs.functions.insertSingle)
+            .addFunction(dtoSpecs.functions.insertBulk)
+            .foldOn(dtoSpecs.functions.selectBySingle.values) { acc, next ->
+                acc.addFunction(next)
+            }
+            .foldOn(dtoSpecs.functions.selectByMultiple.values) { acc, next ->
+                acc.addFunction(next)
+            }
+            .foldOn(dtoSpecs.functions.update.values) { acc, next ->
+                acc.addFunction(next)
+            }
+            .foldOn(dtoSpecs.functions.delete.values) { acc, next ->
+                acc.addFunction(next)
+            }
+            .build()
+            .writeTo(codeGenerator, Dependencies(false, originatingFile))
     }
 
 //    private fun writeRoutes(
@@ -190,68 +176,18 @@ class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, privat
 //            .build()
 //            .writeTo(codeGenerator, Dependencies(false, originatingFile))
 //    }
-//
-//    private fun writeQueries(
-//        tableDeclaration: TableDeclaration,
-//        dtoSpecs: DTOSpecs,
-//        originatingFile: KSFile
-//    ): GeneratedQueryFunctions {
-//        val functions = GeneratedQueryFunctions(
-//            generateSingleInsert(tableDeclaration, dtoSpecs, map),
-//            generateBulkInsert(dtoClassName, allProperties, tableClassName),
-//            allProperties.associateWith {
-//                generateSelectBySingleProperty(
-//                    dtoClassName = dtoClassName,
-//                    parameter = it,
-//                    allParameters = allProperties,
-//                    tableTypeSpec = tableClassName
-//                )
-//            },
-//            allProperties.associateWith {
-//                generateSelectByMultipleProperties(
-//                    dtoClassName = dtoClassName,
-//                    parameter = it,
-//                    allParameters = allProperties,
-//                    tableTypeSpec = tableClassName
-//                )
-//            },
-//            allProperties.associateWith { generateDeleteBySingleProperty(it, tableClassName) },
-//            dtoPropertiesSpecs.associate {
-//                it.parameter to generateUpdateBySingleProperty(
-//                    dtoClassName = dtoClassName,
-//                    dtoParameter = it.parameter,
-//                    dtoPropertiesSpecs = dtoPropertiesSpecs,
-//                    tableTypeSpec = tableClassName
-//                )
-//            },
-//        )
-//        FileSpec.builder("$generatedPackageName.queries", "${tableClassName.simpleName}Queries")
-//            .addImport(
-//                "org.jetbrains.exposed.sql",
-//                "insert", "Transaction", "select", "deleteWhere", "update"
-//            )
-//            .addImport("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
-//            .addImport(dtoClassName.packageName, dtoClassName.simpleName)
-//            .addFunction(functions.insertSingle)
-//            .addFunction(functions.insertBulk)
-//            .foldOn(functions.selectBySingle.values) { acc, spec -> acc.addFunction(spec) }
-//            .foldOn(functions.delete.values) { acc, spec -> acc.addFunction(spec) }
-//            .foldOn(functions.selectByMultiple.values) { acc, spec -> acc.addFunction(spec) }
-//            .foldOn(functions.update.values) { acc, spec -> acc.addFunction(spec) }
-//            .build()
-//            .writeTo(codeGenerator, Dependencies(false, originatingFile))
-//        return functions
-//    }
 
     private fun writeDtos(
-        rootPackageName: String,
         dtoSpecs: DTOSpecs,
         originatingFile: KSFile
-    ) = FileSpec.builder("$rootPackageName.dto", dtoSpecs.dtoClassName.simpleName)
-        .addType(dtoSpecs.dto)
-        .addType(dtoSpecs.updateQueryDto)
-        .build()
-        .writeTo(codeGenerator, Dependencies(false, originatingFile))
+    ) {
+        val packageName = dtoSpecs.tableDeclaration.className.packageName
+        FileSpec.builder("$packageName.dto", dtoSpecs.className.simpleName)
+            .addType(dtoSpecs.dto)
+            .addType(dtoSpecs.updateQueryDto)
+            .build()
+            .writeTo(codeGenerator, Dependencies(false, originatingFile))
+    }
 
 }
 

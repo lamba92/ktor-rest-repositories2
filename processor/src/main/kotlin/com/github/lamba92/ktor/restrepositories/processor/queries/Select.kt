@@ -1,3 +1,5 @@
+@file:Suppress("NAME_SHADOWING")
+
 package com.github.lamba92.ktor.restrepositories.processor.queries
 
 import com.github.lamba92.ktor.restrepositories.processor.*
@@ -23,66 +25,70 @@ fun generateSelectBySingleProperty(
     dtoProperty: DTOProperty,
     map: MutableMap<TableDeclaration, DTOSpecs.WithFunctions>
 ): FunSpec {
-    val tableParameter = dtoSpecs.tableDeclaration.className.asParameter()
     val funSpec = FunSpec
-        .builder("select${dtoSpecs.tableDeclaration.providedSingularName}By${dtoProperty.parameter.name.capitalize()}")
+        .builder("select${dtoSpecs.tableDeclaration.names.singular}By${dtoProperty.parameter.name.capitalize()}")
         .contextReceiver<Transaction>()
-        .addParameter("parameter", dtoProperty.parameter.type.copy(nullable = false))
-        .addParameter(tableParameter)
-        .returns(dtoSpecs.dtoClassName)
+        .addParameter(dtoProperty.parameter.nonNullable())
+        .addParameter(dtoSpecs.tableDeclaration.parameter)
+        .returns(dtoSpecs.className)
     val tablesToAdd = mutableSetOf<ParameterSpec>()
     val codeBlock = CodeBlock.builder()
         .addStatement(
-            format = "val statement = %N.select { %N.%L eq parameter }.single()",
-            tableParameter, tableParameter, dtoProperty.declarationSimpleName
+            format = "val statement = %N.select { %N.%L eq %N }.single()",
+            dtoSpecs.tableDeclaration.parameter, dtoSpecs.tableDeclaration.parameter, dtoProperty.declarationSimpleName,
+            dtoProperty.parameter.nonNullable()
         )
-        .addStatement("return %T(", dtoSpecs.dtoClassName)
+        .addStatement("return %T(", dtoSpecs.className)
         .indent()
         .foldIndexedOn(dtoSpecs.properties) { index, acc, next ->
             when (next) {
                 is DTOProperty.Simple -> acc.addStatement(
                     "%N = statement[%N.%N]".appendIf(index != dtoSpecs.properties.lastIndex, ","),
-                    next.property, tableParameter, next.property
+                    next.property, dtoSpecs.tableDeclaration.parameter, next.property
                 )
 
                 is DTOProperty.WithReference -> {
-                    val insertSpec = map.getValue(next.reference.tableDeclaration)
+                    val selectSpec = map.getValue(next.reference.tableDeclaration)
                         .functions.selectBySingle.getValue(next.reference.propertyName)
                     val isNullable = next.declaration.type.resolve().arguments
                         .first().type!!.resolve().isMarkedNullable
-                    val tables = insertSpec.parameters.drop(1)
+                    val tables = selectSpec.parameters.drop(1)
                     tablesToAdd.addAll(tables)
-                    if (!isNullable) acc.addStatement("%N = %N(", next.property, insertSpec)
-                        .indent()
-                        .addStatement(
-                            format = "parameter = statement[%N.%L],",
-                            tableParameter,
-                            next.declarationSimpleName
+                    if (!isNullable) {
+                        acc.addStatement("%N = %N(", next.property, selectSpec)
+                            .indent()
+                            .addStatement(
+                                format = "%L = statement[%N.%L],",
+                                next.reference.propertyName,
+                                dtoSpecs.tableDeclaration.parameter,
+                                next.declarationSimpleName
+                            )
+                            .foldOn(tables) { acc, tableParamSpec ->
+                                acc.addStatement(
+                                    "%N = %N".appendIf(index != tables.lastIndex, ","),
+                                    tableParamSpec, tableParamSpec
+                                )
+                            }
+                            .unindent()
+                            .addStatement(")")
+                    } else {
+                        acc.beginControlFlow(
+                            "%N = statement[%N.%L]?.let {",
+                            next.property, dtoSpecs.tableDeclaration.parameter, next.declarationSimpleName
                         )
-                        .foldOn(tables) { acc, tableParamSpec ->
-                            acc.addStatement(
-                                "%N = %N".appendIf(index != tables.lastIndex, ","),
-                                tableParamSpec, tableParamSpec
-                            )
-                        }
-                        .unindent()
-                        .addStatement(")")
-                    else acc.beginControlFlow(
-                        "%N = statement[%N.%L]?.let {",
-                        next.property, tableParameter, next.declarationSimpleName
-                    )
-                        .addStatement("%N(", insertSpec)
-                        .indent()
-                        .addStatement("parameter = it,")
-                        .foldOn(tables) { acc, tableParamSpec ->
-                            acc.addStatement(
-                                "%N = %N".appendIf(index != tables.lastIndex, ","),
-                                tableParamSpec, tableParamSpec
-                            )
-                        }
-                        .unindent()
-                        .addStatement(")")
-                        .endControlFlow(if (index != dtoSpecs.properties.lastIndex) "," else "")
+                            .addStatement("%N(", selectSpec)
+                            .indent()
+                            .addStatement("%N = it,", selectSpec.parameters.first())
+                            .foldOn(tables) { acc, tableParamSpec ->
+                                acc.addStatement(
+                                    "%N = %N".appendIf(index != tables.lastIndex, ","),
+                                    tableParamSpec, tableParamSpec
+                                )
+                            }
+                            .unindent()
+                            .addStatement(")")
+                            .endControlFlow(if (index != dtoSpecs.properties.lastIndex) "," else "")
+                    }
                 }
             }
 
@@ -101,12 +107,13 @@ fun generateSelectByMultipleProperties(
     dtoProperty: DTOProperty,
     selectSingle: FunSpec
 ): FunSpec {
+    val paramName = dtoProperty.parameter.name + "s"
     val tables = selectSingle.parameters.drop(1)
     val codeBlock = CodeBlock.builder()
-        .beginControlFlow("return parameters.map { ")
+        .beginControlFlow("return %L.map { ", paramName)
         .addStatement("%N(", selectSingle)
         .indent()
-        .addStatement("parameter = it,")
+        .addStatement("%N = it,", selectSingle.parameters.first())
         .foldIndexedOn(tables) { index, acc, next ->
             acc.addStatement("%N = %N".appendIf(index != tables.lastIndex, ","), next, next)
         }
@@ -114,13 +121,13 @@ fun generateSelectByMultipleProperties(
         .addStatement(")")
         .endControlFlow()
         .build()
-    val cPluralName = dtoSpecs.tableDeclaration.providedPluralName.capitalize()
+    val cPluralName = dtoSpecs.tableDeclaration.names.plural.capitalize()
     val cPropertyName = dtoProperty.declarationSimpleName.capitalize()
     return FunSpec.builder("select${cPluralName}By$cPropertyName")
         .contextReceiver<Transaction>()
-        .addParameter("parameters", dtoProperty.parameter.type.copy(nullable = false).list())
+        .addParameter(paramName, dtoProperty.parameter.type.copy(nullable = false).list())
         .addParameters(tables)
-        .returns(dtoSpecs.dtoClassName.list())
+        .returns(dtoSpecs.className.list())
         .addCode(codeBlock)
         .build()
 }

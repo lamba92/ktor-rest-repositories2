@@ -21,7 +21,7 @@ fun generateDeleteRouteFunctionSpecForParam(
             .beginControlFlow("newSuspendedTransaction(db = database) {")
             .addStatement(
                 "val intercepted = behaviour.restRepositoryInterceptor(this, %T(%N = param))",
-                dtoSpecs.dtoClassName,
+                dtoSpecs.className,
                 parameterSpec
             )
             .addStatement("val message = \"Parameter %T.%N\" +", tableTypeSpec, parameterSpec)
@@ -35,7 +35,7 @@ fun generateDeleteRouteFunctionSpecForParam(
         it.addStatement("val params = call.receive<%T>()", TypeName.list(nonNullableParameterSpecType))
             .beginControlFlow("newSuspendedTransaction(db = database) {")
             .beginControlFlow("val intercepted = params.map { param ->")
-            .addStatement("behaviour.restRepositoryInterceptor(this, %T(%N = param))", dtoSpecs.dtoClassName, parameterSpec)
+            .addStatement("behaviour.restRepositoryInterceptor(this, %T(%N = param))", dtoSpecs.className, parameterSpec)
             .endControlFlow()
             .beginControlFlow("intercepted.forEach { dto ->")
             .addStatement("val message = \"Parameter %T.%N\" +", tableTypeSpec, parameterSpec)
@@ -59,7 +59,7 @@ fun generateDeleteRouteFunctionSpecForParam(
         .receiver(Route::class)
         .addParameter("table", tableTypeSpec)
         .addParameter("database", Database::class)
-        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpecs.dtoClassName))
+        .addParameter("behaviour", EndpointBehaviour::class.asTypeName().parameterizedBy(dtoSpecs.className))
         .addCode(generateAuthCode(getCheckAuthCode, getCheckAuthCode))
         .build()
 }
