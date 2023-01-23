@@ -125,9 +125,9 @@ fun Resolver.getDeclaredTables() =
                 ?.value as? String
                 ?: it.simpleName.asString().removeSuffix("Table")
             val providedPluralName = arguments
-                ?.first()
+                ?.get(1)
                 ?.value as? String
-                ?: it.simpleName.asString().appendIfMissing("Table")
+                ?: it.simpleName.asString().removeSuffix("Table").appendIfMissing("s")
             TableDeclaration(it, RestRepositoryName(providedSingularName, providedPluralName))
         }
 

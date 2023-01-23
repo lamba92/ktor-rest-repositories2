@@ -1,6 +1,7 @@
 package com.github.lamba92.ktor.restrepositories.processor.endpoints
 
 import com.github.lamba92.ktor.restrepositories.EndpointBehaviour
+import com.github.lamba92.ktor.restrepositories.processor.DTOProperty
 import com.github.lamba92.ktor.restrepositories.processor.DTOSpecs
 import com.github.lamba92.ktor.restrepositories.processor.list
 import com.github.lamba92.ktor.restrepositories.processor.capitalize
@@ -11,22 +12,26 @@ import org.jetbrains.exposed.sql.Database
 
 fun generateDeleteRouteFunctionSpecForParam(
     dtoSpecs: DTOSpecs,
-    tableTypeSpec: ClassName,
-    parameterSpec: ParameterSpec,
-    updateFunctionSpec: FunSpec,
+    dtoProperty: DTOProperty
 ): FunSpec {
-    val nonNullableParameterSpecType = parameterSpec.type.copy(nullable = false)
+    val nonNullableParameterSpecType = dtoProperty.parameter.type.copy(nullable = false)
     val getSingleContent: CodeBlockTransform = {
         it.addStatement("val param = call.receive<%T>()", nonNullableParameterSpecType)
             .beginControlFlow("newSuspendedTransaction(db = database) {")
             .addStatement(
                 "val intercepted = behaviour.restRepositoryInterceptor(this, %T(%N = param))",
                 dtoSpecs.className,
-                parameterSpec
+                dtoProperty.parameter
             )
-            .addStatement("val message = \"Parameter %T.%N\" +", tableTypeSpec, parameterSpec)
+            .addStatement(
+                "val message = \"Parameter %T.%N\" +",
+                dtoSpecs.tableDeclaration.className, dtoProperty.property
+            )
             .addStatement("\t%S", "is null after being transformed by the restRepositoryInterceptor")
-            .addStatement("table.%N(requireNotNull(intercepted.%N) { message })", updateFunctionSpec, parameterSpec)
+            .addStatement("%N(", updateFunctionSpec, parameterSpec)
+            .indent()
+            .addStatement("%N = requireNotNull(intercepted.%N) { message }", )
+            .unindent()
             .endControlFlow()
             .addStatement("call.respond(HttpStatusCode.OK)")
     }

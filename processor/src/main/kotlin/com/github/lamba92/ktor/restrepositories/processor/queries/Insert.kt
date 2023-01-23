@@ -102,6 +102,7 @@ fun generateSingleInsert(
         .build()
 }
 
+context(LoggerContext)
 fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
     val returnType = TypeName.list(dtoSpecs.className)
     val queue = dtoSpecs.properties
@@ -114,13 +115,14 @@ fun generateBulkInsert(dtoSpecs: DTOSpecs, singleInsertSpec: FunSpec): FunSpec {
         queue.addAll(next.dtoSpec.properties.filterIsInstance<DTOProperty.WithReference>())
     }
     val tableParams = tables.map { it.parameter }
+    val cName = dtoSpecs.tableDeclaration.names.plural.decapitalize()
     return FunSpec.builder("insert")
         .contextReceiver<Transaction>()
-        .addParameter(ParameterSpec.builder("dtos", returnType).build())
+        .addParameter(ParameterSpec.builder(cName, returnType).build())
         .addParameters(tableParams)
         .addCode(
             CodeBlock.builder()
-                .add("return dtos.map { %N(it, ", singleInsertSpec)
+                .add("return %L.map { %N(it, ", cName, singleInsertSpec)
                 .foldIndexedOn(tableParams) { index, acc, next ->
                     acc.add("%N".appendIf(index != tableParams.lastIndex, ", "), next)
                 }
