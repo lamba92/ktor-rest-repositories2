@@ -11,6 +11,10 @@ import kotlin.reflect.KClass
 @Target(AnnotationTarget.CLASS)
 annotation class RestRepository
 
+
+annotation class AutoIncrement
+annotation class Ignore
+
 @Retention(AnnotationRetention.SOURCE)
 @Target(AnnotationTarget.CLASS, AnnotationTarget.PROPERTY)
 annotation class RestRepositoryName(val singular: String, val plural: String)

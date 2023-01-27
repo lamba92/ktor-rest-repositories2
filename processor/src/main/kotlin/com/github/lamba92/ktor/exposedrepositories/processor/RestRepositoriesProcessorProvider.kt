@@ -9,7 +9,3 @@ class RestRepositoriesProcessorProvider : SymbolProcessorProvider {
         RestRepositoriesProcessor(environment.codeGenerator, environment.logger.asContext())
 }
 
-fun KSPLogger.asContext() = object : LoggerContext {
-    override val logger: KSPLogger
-        get() = this@asContext
-}

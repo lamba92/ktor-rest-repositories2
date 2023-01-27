@@ -15,15 +15,9 @@ fun Application.testServer(database: Database, isAuthenticated: Boolean) {
         json()
     }
     install(RestRepositories) {
-        repositoryPath = "api"
         registerCityTable(database) {
-            tablePath = "myCities"
-            addEndpoint(INSERT) {
-
-            }
             addEndpoints(INSERT, SELECT, UPDATE, DELETE) {
                 this.isAuthenticated = isAuthenticated
-                authNames = listOf()
             }
         }
         registerUserTable(database) {

@@ -14,8 +14,10 @@ import com.squareup.kotlinpoet.FileSpec
 import com.squareup.kotlinpoet.ksp.writeTo
 import io.ktor.http.*
 
-class RestRepositoriesProcessor(private val codeGenerator: CodeGenerator, private val loggerContext: LoggerContext) :
-    SymbolProcessor {
+class RestRepositoriesProcessor(
+    private val codeGenerator: CodeGenerator,
+    private val loggerContext: LoggerContext
+) : SymbolProcessor {
 
     companion object {
         val RestRepositoryFQN = RestRepository::class.qualifiedName!!

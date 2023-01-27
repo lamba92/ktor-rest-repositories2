@@ -21,63 +21,94 @@ fun generateSingleInsert(
     dtoSpecs: DTOSpecs,
     map: MutableMap<TableDeclaration, DTOSpecs.WithFunctions>
 ): FunSpec {
-    val funSpec = FunSpec.builder("insert")
+    val funSpec = FunSpec.builder("insert${dtoSpecs.tableDeclaration.names.singular.capitalize()}")
         .contextReceiver<Transaction>()
         .addParameter(dtoSpecs.parameter)
         .addParameter(dtoSpecs.tableDeclaration.parameter)
-    val queue = mutableListOf<PropertyQueueElement>()
+    val propertiesWithReference =
+        dtoSpecs.properties.filterIsInstance<DTOProperty.WithReference>()
+    val tables = mutableSetOf<ParameterSpec>()
+
     val codeBlock = CodeBlock.builder()
-        .beginControlFlow("val insertStatement = %N.insert {", dtoSpecs.tableDeclaration.parameter)
+        .foldOn(propertiesWithReference) { acc, dtoProperty ->
+            val specsWithFunctions = map.getValue(dtoProperty.reference.tableDeclaration)
+            val parameters = specsWithFunctions.functions.insertSingle.parameters
+            val insertTablesParams = parameters.drop(1)
+            tables.addAll(insertTablesParams)
+            if (!dtoProperty.property.type.isNullable) {
+                acc.addStatement(
+                    "val %L = %N(",
+                    dtoProperty.reference.referencedJsonParameterName, specsWithFunctions.functions.insertSingle
+                )
+                    .indent()
+                    .addStatement(
+                        "%N = %N.%N,",
+                        parameters.first(), dtoSpecs.parameter, dtoProperty.property
+                    )
+                    .foldIndexedOn(insertTablesParams) { index, acc, next ->
+                        acc.addStatement(
+                            "%N = %N".appendIf(index != parameters.lastIndex, ","),
+                            next, next
+                        )
+                    }
+                    .unindent()
+                    .addStatement(")")
+            } else {
+                acc.beginControlFlow(
+                    "val %L = %N.%N?.let {",
+                    dtoProperty.reference.referencedJsonParameterName, dtoSpecs.parameter, dtoProperty.property
+                )
+                    .addStatement("%N(", specsWithFunctions.functions.insertSingle)
+                    .indent()
+                    .addStatement("%N = it,", dtoProperty.reference.dtoSpec.parameter)
+                    .foldIndexedOn(insertTablesParams) { index, acc, parameter ->
+                        acc.addStatement(
+                            "%N = %N".appendIf(index != insertTablesParams.lastIndex, ","),
+                            parameter, parameter
+                        )
+                    }
+                    .unindent()
+                    .addStatement(")")
+                    .endControlFlow()
+            }
+        }
+        .beginControlFlow("val insertStatement = %N.insert { statement ->", dtoSpecs.tableDeclaration.parameter)
         .foldOn(dtoSpecs.properties) { acc, dtoProperty ->
             val cName = dtoProperty.parameter.name.capitalize()
             when (dtoProperty) {
                 is DTOProperty.Simple -> acc.addStatement(
-                    format = "%N.%N?.let { dto%L -> it[%N.%L] = dto%L }",
-                    dtoSpecs.parameter, dtoProperty.property, cName, dtoSpecs.tableDeclaration.parameter,
-                    dtoProperty.declarationSimpleName, cName
+                    "statement[%N.%L] = %N.%N",
+                    dtoSpecs.tableDeclaration.parameter, dtoProperty.declarationSimpleName,
+                    dtoSpecs.parameter, dtoProperty.property
                 )
 
                 is DTOProperty.WithReference -> {
-                    queue.add(
-                        PropertyQueueElement(
-                            dtoProperty = dtoProperty,
-                            specWithFunctions = map.getValue(dtoProperty.reference.tableDeclaration)
+                    val isReferenceNullable =
+                        dtoProperty.reference.dtoSpec.properties
+                            .first { it.property.name == dtoProperty.reference.propertyName }
+                            .property.type.isNullable
+                    if (dtoProperty.property.type.isNullable || isReferenceNullable) {
+                        val initial = buildString {
+                            append("%N")
+                            if (dtoProperty.property.type.isNullable) append("?")
+                            append(".%N")
+                            if (dtoProperty.property.type.isNullable || isReferenceNullable) append("?")
+                        }
+                        acc.addStatement(
+                            format = "$initial.let { statement[%N.%N] = it }",
+                            dtoProperty.property, dtoProperty.reference.propertyName,
+                            dtoSpecs.tableDeclaration.parameter, dtoProperty.declarationSimpleName
                         )
-                    )
-                    acc.addStatement(
-                        format = "%N.%N?.%N?.let { dto%L -> it[%N.%N] = dto%L }",
-                        dtoSpecs.parameter,
-                        dtoProperty.property, dtoProperty.reference.propertyName,
-                        dtoProperty.declarationSimpleName.capitalize(),
+                    } else acc.addStatement(
+                        "statement[%N.%N] = %N.%N",
                         dtoSpecs.tableDeclaration.parameter, dtoProperty.declarationSimpleName,
-                        dtoProperty.declarationSimpleName.capitalize()
+                        dtoProperty.property, dtoProperty.reference.propertyName
                     )
+
                 }
             }
         }
         .endControlFlow()
-    val tables = mutableSetOf<ParameterSpec>()
-    queue.forEach { (dtoProperty, specsWithFunctions) ->
-        codeBlock.beginControlFlow(
-            "val %L = %N.%N?.let {",
-            dtoProperty.reference.referencedJsonParameterName, dtoSpecs.parameter, dtoProperty.property
-        )
-        codeBlock.addStatement("%N(", specsWithFunctions.functions.insertSingle)
-            .indent()
-            .addStatement("%N = it,", dtoProperty.reference.dtoSpec.parameter)
-        specsWithFunctions.functions.insertSingle
-            .parameters
-            .filter { it.type != dtoProperty.property.type.copy(nullable = false) }
-            .forEachIndexed { index, insertParameter ->
-                tables.add(insertParameter)
-                codeBlock.addStatement(
-                    "%N = %N".appendIf(index != specsWithFunctions.functions.insertSingle.parameters.size - 2, ","),
-                    insertParameter, insertParameter
-                )
-            }
-        codeBlock.unindent().addStatement(")")
-        codeBlock.endControlFlow()
-    }
     funSpec.addParameters(tables)
     codeBlock
         .addStatement("return %T(", dtoSpecs.className)

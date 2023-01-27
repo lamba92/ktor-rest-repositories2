@@ -9,6 +9,10 @@ restRepositories {
     addDependency.set(false)
 }
 
+kotlin.sourceSets.all {
+    languageSettings.optIn("kotlin.io.path.ExperimentalPathApi")
+}
+
 dependencies {
     implementation(libs.exposed.core)
     implementation(libs.kotlinx.serialization.core)
@@ -29,5 +33,5 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
-    environment("DB_FILE_PATH", file("$buildDir/testDb.db").absolutePath)
+    environment("DB_FILE_PATH", file("$buildDir/tmp/db").also { it.mkdirs() }.resolve("test"))
 }

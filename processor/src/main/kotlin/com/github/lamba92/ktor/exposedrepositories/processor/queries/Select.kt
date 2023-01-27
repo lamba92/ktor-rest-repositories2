@@ -64,14 +64,14 @@ fun generateSelectBySingleProperty(
                                 next.reference.propertyName, dtoSpecs.tableDeclaration.parameter,
                                 next.declarationSimpleName
                             )
-                            .foldOn(tables) { acc, tableParamSpec ->
+                            .foldIndexedOn(tables) { index, acc, tableParamSpec ->
                                 acc.addStatement(
                                     "%N = %N".appendIf(index != tables.lastIndex, ","),
                                     tableParamSpec, tableParamSpec
                                 )
                             }
                             .unindent()
-                            .addStatement(")")
+                            .addStatement(")".appendIf(index != dtoSpecs.properties.lastIndex, ","))
                     } else {
                         acc.beginControlFlow(
                             "%N = statement[%N.%L]?.let {",
@@ -87,7 +87,7 @@ fun generateSelectBySingleProperty(
                                 )
                             }
                             .unindent()
-                            .addStatement(")")
+                            .addStatement(")".appendIf(index != dtoSpecs.properties.lastIndex, ","))
                             .endControlFlow(if (index != dtoSpecs.properties.lastIndex) "," else "")
                     }
                 }

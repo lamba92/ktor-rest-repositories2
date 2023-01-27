@@ -11,14 +11,10 @@ dependencies {
 }
 
 kotlin {
-    target {
-        compilations {
-            all {
-                kotlinOptions {
-                    freeCompilerArgs += "-Xcontext-receivers"
-                    jvmTarget = "17"
-                }
-            }
+    target.compilations.all {
+        kotlinOptions {
+            freeCompilerArgs += "-Xcontext-receivers"
+            jvmTarget = "17"
         }
     }
     sourceSets {

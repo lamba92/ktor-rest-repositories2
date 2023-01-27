@@ -17,6 +17,13 @@ plugins {
     signing
 }
 
+java {
+    toolchain {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+}
+
 group = "com.github.lamba92"
 version = System.getenv("GITHUB_REF")
     ?.split("/")

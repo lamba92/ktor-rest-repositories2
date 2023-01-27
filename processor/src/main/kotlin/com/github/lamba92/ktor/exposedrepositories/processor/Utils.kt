@@ -1,9 +1,12 @@
 package com.github.lamba92.ktor.exposedrepositories.processor
 
+import com.github.lamba92.ktor.exposedrepositories.annotations.Ignore
 import com.github.lamba92.ktor.exposedrepositories.annotations.Reference
 import com.github.lamba92.ktor.exposedrepositories.annotations.RestRepositoryName
 import com.google.devtools.ksp.getAnnotationsByType
 import com.google.devtools.ksp.getDeclaredProperties
+import com.google.devtools.ksp.isAnnotationPresent
+import com.google.devtools.ksp.processing.KSPLogger
 import com.google.devtools.ksp.processing.Resolver
 import com.google.devtools.ksp.symbol.*
 import com.squareup.kotlinpoet.*
@@ -46,10 +49,13 @@ inline fun <reified T> Sequence<KSAnnotation>.filterAnnotationsOfType() =
 
 context(LoggerContext)
 fun ColumnDeclaration(propertyDeclaration: KSPropertyDeclaration): ColumnDeclaration? {
+    if (propertyDeclaration.isAnnotationPresent(Ignore::class)) return null
     val resolvedType = propertyDeclaration.type.resolve()
+
     if (resolvedType.declaration.qualifiedName?.asString() != Column::class.qualifiedName) {
         return null
     }
+
     val annotationArguments = propertyDeclaration.annotations
         .filterAnnotationsOfType<Reference>()
         .firstOrNull()
@@ -84,14 +90,16 @@ fun KSType.resolveColumnType(): EntityIdType {
 
 fun ColumnDeclaration.Simple.generateDTOPropertiesSpecs(): DTOProperty.Simple {
     val name = declaration.simpleName.asString()
-    val (isEntityId, type1) = resolvedType.resolveColumnType()
-    val propertySpecBuilder = PropertySpec.builder(name, type1.toTypeName().copy(nullable = true))
-    val parameterSpecBuilder = ParameterSpec.builder(name, type1.toTypeName().copy(nullable = true))
-        .defaultValue("null")
+    val (isEntityId, ksType) = resolvedType.resolveColumnType()
+    val typeName = ksType.toTypeName().run { copy(nullable = isNullable || isAutoIncrement) }
+    val propertySpecBuilder = PropertySpec.builder(name, typeName)
+    val parameterSpecBuilder = ParameterSpec.builder(name, typeName)
+    if (typeName.isNullable)
+        parameterSpecBuilder.defaultValue("null")
     propertySpecBuilder.initializer(name)
     parameterSpecBuilder.copyKotlinxSerializationAnnotations(declaration.annotations)
     return DTOProperty.Simple(
-        originalColumnType = type1,
+        originalColumnType = ksType,
         property = propertySpecBuilder.build(),
         parameter = parameterSpecBuilder.build(),
         declaration = declaration,
@@ -99,18 +107,22 @@ fun ColumnDeclaration.Simple.generateDTOPropertiesSpecs(): DTOProperty.Simple {
     )
 }
 
+context(LoggerContext)
 fun ColumnDeclaration.WithReference.generateDTOPropertiesSpecs(
     referencedDtoSpec: DTOSpecs,
     referencedTableDeclaration: TableDeclaration
 ): DTOProperty.WithReference {
-    val type = referencedDtoSpec.className.copy(nullable = true)
-    val propertySpecBuilder = PropertySpec.builder(reference.jsonParameterName, type)
-    val parameterSpecBuilder = ParameterSpec.builder(reference.jsonParameterName, type)
-        .defaultValue("null")
+    val (isEntityId, innerColumnType) = resolvedType.resolveColumnType()
+    val typeName = referencedDtoSpec.className
+        .copy(nullable = innerColumnType.isMarkedNullable || isAutoIncrement)
+    logger.warn(resolvedType.toString())
+    val propertySpecBuilder = PropertySpec.builder(reference.jsonParameterName, typeName)
+    val parameterSpecBuilder = ParameterSpec.builder(reference.jsonParameterName, typeName)
+    if (typeName.isNullable)
+        parameterSpecBuilder.defaultValue("null")
     propertySpecBuilder.initializer(reference.jsonParameterName)
-    val (isEntityId, type1) = resolvedType.resolveColumnType()
     return DTOProperty.WithReference(
-        originalColumnType = type1,
+        originalColumnType = innerColumnType,
         property = propertySpecBuilder.build(),
         parameter = parameterSpecBuilder.build(),
         declaration = declaration,
@@ -183,3 +195,8 @@ fun <K, V> Map<K, V>.partition(partition: (K, V) -> Boolean) =
     entries.map { Pair(it.key, it.value) }
         .partition { (k, v) -> partition(k, v) }
         .let { it.first.toMap() to it.second.toMap() }
+
+fun KSPLogger.asContext() = object : LoggerContext {
+    override val logger: KSPLogger
+        get() = this@asContext
+}

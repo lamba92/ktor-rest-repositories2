@@ -1,8 +1,6 @@
 package com.github.lamba92.ktor.exposedrepositories.tests
 
-import com.github.lamba92.ktor.exposedrepositories.annotations.Reference
-import com.github.lamba92.ktor.exposedrepositories.annotations.RestRepository
-import com.github.lamba92.ktor.exposedrepositories.annotations.RestRepositoryName
+import com.github.lamba92.ktor.exposedrepositories.annotations.*
 import org.jetbrains.exposed.sql.Table
 
 @RestRepository
@@ -11,7 +9,9 @@ object UserTable : Table() {
     val name = varchar("name", 22)
     val surname = varchar("surname", 255)
     val age = integer("age")
-    val email = varchar("email", 255).entityId()
+
+    @Ignore
+    val email = varchar("email", 255)
 
     @Reference(CityTable::class, "id", "city")
     val cityId = integer("cityId").references(CityTable.id).nullable()
@@ -25,7 +25,10 @@ object UserTable : Table() {
 @RestRepository
 @RestRepositoryName("City", "Cities")
 object CityTable : Table() {
-    val id = integer("id").autoIncrement().entityId()
+
+    @AutoIncrement
+    val id = integer("id").autoIncrement()
+
     val name = varchar("name", 50)
 
     @Reference(TestReferenceTable::class, "id", "test")
@@ -36,7 +39,7 @@ object CityTable : Table() {
 
 @RestRepository
 object TestReferenceTable : Table() {
-    val id = integer("id").autoIncrement().entityId()
+    val id = integer("id").autoIncrement()
 
     override val primaryKey = PrimaryKey(id)
 }
